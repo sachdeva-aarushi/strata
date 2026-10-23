@@ -49,6 +49,7 @@ class Facility(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     location_country: Mapped[str] = mapped_column(String(2), default="US", nullable=False)
     location_postal_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    cluster_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="facilities")
     material_lots: Mapped[list["MaterialLot"]] = relationship("MaterialLot", back_populates="facility")

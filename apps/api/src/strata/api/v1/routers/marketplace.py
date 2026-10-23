@@ -5,13 +5,18 @@ from sqlalchemy.orm import Session
 
 from strata.core.auth import AuthUser, get_current_user
 from strata.db.session import get_db
+from strata.domain.marketplace.cluster import ClusterSynergyEngine
 from strata.domain.marketplace.qualification import ProofPathQualificationClient
 from strata.domain.marketplace.schemas import (
+    AggregationProposal,
     BuyerRequirementCreate,
     BuyerRequirementRead,
+    ClusterSummary,
     ListingCreate,
     ListingRead,
     ListingStatusUpdateRequest,
+    LogisticsEstimate,
+    LogisticsEstimateRequest,
     OfferCreate,
     OfferRead,
     QualificationResult,
@@ -387,3 +392,74 @@ def reject_offer(
         notes=payload.notes if payload else None,
     )
     return ResponseEnvelope(data=rejected, meta=MetaInfo())
+
+
+# ---------------------------------------------------------------------------
+# Cluster Synergy and Batch Aggregation
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/cluster/{cluster_id}/synergies",
+    response_model=ResponseEnvelope[List[AggregationProposal]],
+)
+def get_cluster_synergies(
+    cluster_id: str,
+    requirement_id: Optional[str] = Query(None, description="Optional target buyer requirement UUID"),
+    max_lots_per_batch: int = Query(5, ge=1, le=10, description="Max lots to aggregate into a batch proposal"),
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[List[AggregationProposal]]:
+    """Identifies multi-lot aggregation proposals meeting buyer volume thresholds within the cluster."""
+    engine = ClusterSynergyEngine(db)
+    if requirement_id:
+        proposals = engine.generate_aggregation_proposals(
+            requirement_id=requirement_id,
+            cluster_id=cluster_id,
+            max_lots_per_batch=max_lots_per_batch,
+        )
+    else:
+        # Retrieve all active buyer requirements accessible
+        all_reqs = engine.repository.list_all_requirements()
+        proposals = []
+        for req in all_reqs:
+            p = engine.generate_aggregation_proposals(
+                requirement_id=req.id,
+                cluster_id=cluster_id,
+                max_lots_per_batch=max_lots_per_batch,
+            )
+            proposals.extend(p)
+    return ResponseEnvelope(data=proposals, meta=MetaInfo())
+
+
+@router.post(
+    "/cluster/logistics-estimate",
+    response_model=ResponseEnvelope[LogisticsEstimate],
+)
+def calculate_cluster_logistics(
+    payload: LogisticsEstimateRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[LogisticsEstimate]:
+    """Calculates indicative consolidation route distance, transport cost (INR), and transport emissions."""
+    engine = ClusterSynergyEngine(db)
+    estimate = engine.calculate_indicative_logistics(
+        lot_ids=payload.lot_ids,
+        destination_facility_id=payload.destination_facility_id,
+        rate_per_km_tonne=payload.rate_per_km_tonne,
+    )
+    return ResponseEnvelope(data=estimate, meta=MetaInfo())
+
+
+@router.get(
+    "/cluster/{cluster_id}/indicators",
+    response_model=ResponseEnvelope[ClusterSummary],
+)
+def get_cluster_indicators(
+    cluster_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[ClusterSummary]:
+    """Returns aggregated cluster circularity metrics, material tonnage breakdown, and synergy opportunities."""
+    engine = ClusterSynergyEngine(db)
+    summary = engine.get_cluster_indicators(cluster_id=cluster_id)
+    return ResponseEnvelope(data=summary, meta=MetaInfo())
