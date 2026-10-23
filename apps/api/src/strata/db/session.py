@@ -22,6 +22,11 @@ def create_app_engine(database_url: str | None = None):
         connect_args["check_same_thread"] = False
     else:
         # PostgreSQL / Supabase
+        if url.startswith("postgresql://"):
+            try:
+                import psycopg  # noqa: F401
+            except Exception:
+                url = "postgresql+psycopg2://" + url[len("postgresql://"):]
         connect_args["connect_timeout"] = settings.DATABASE_CONNECT_TIMEOUT
         # Enforce SSL requirement for remote Supabase connections if not specified in URL
         if ("supabase.co" in url or "pooler.supabase.com" in url) and "sslmode" not in url:
