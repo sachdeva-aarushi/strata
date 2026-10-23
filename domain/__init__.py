@@ -1,1 +1,0 @@
-"""STRATA Domain Layer."""
