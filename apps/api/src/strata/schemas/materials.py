@@ -63,18 +63,42 @@ class MaterialLotCreate(MaterialLotBase):
         default=MaterialLotStatus.DRAFT,
         description="Initial lifecycle status",
     )
+    evidence_ids: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Optional list of existing evidence record UUIDs to attach upon registration",
+    )
 
 
 class MaterialLotUpdate(BaseModel):
     """Request payload for updating an existing material lot."""
     material_type: Optional[str] = None
-    quantity: Optional[float] = Field(default=None, gt=0)
+    quantity: Optional[float] = Field(default=None, gt=0, description="Measured quantity, must be greater than zero")
     unit: Optional[str] = None
     status: Optional[MaterialLotStatus] = None
     availability_from: Optional[date] = None
     availability_to: Optional[date] = None
     declared_attributes: Optional[Dict[str, Any]] = None
     provenance_label: Optional[EvidenceStatus] = None
+    evidence_ids: Optional[List[str]] = Field(
+        default=None,
+        description="Optional list of evidence record UUIDs to associate with this lot",
+    )
+
+    @field_validator("unit")
+    @classmethod
+    def validate_unit(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        allowed = {"kg", "tonne", "litre", "m3", "unit"}
+        cleaned = v.strip().lower()
+        if cleaned not in allowed:
+            raise ValueError(f"Invalid unit '{v}'. Allowed units: {', '.join(sorted(allowed))}")
+        return cleaned
+
+
+class EvidenceAttachRequest(BaseModel):
+    """Request payload for associating existing evidence records with a material lot."""
+    evidence_ids: List[str] = Field(..., min_length=1, description="List of evidence record UUIDs to associate")
 
 
 class MaterialLotRead(MaterialLotBase):
@@ -82,6 +106,7 @@ class MaterialLotRead(MaterialLotBase):
     lot_id: str = Field(..., description="Unique Material Lot UUID")
     org_id: str = Field(..., description="Owning tenant organization UUID")
     status: MaterialLotStatus = Field(..., description="Current lifecycle status")
+    evidence_ids: List[str] = Field(default_factory=list, description="IDs of attached evidence records")
     created_at: datetime
     updated_at: datetime
 

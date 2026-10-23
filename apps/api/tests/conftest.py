@@ -31,6 +31,7 @@ def setup_database():
     """Create all database schema tables once per test session."""
     import strata.domain.materials.models  # noqa: F401
     import strata.domain.qualification.models  # noqa: F401
+    import strata.domain.marketplace.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     yield

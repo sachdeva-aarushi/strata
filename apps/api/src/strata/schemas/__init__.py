@@ -26,6 +26,7 @@ from strata.schemas.marketplace import (
     RFQStatus,
 )
 from strata.schemas.materials import (
+    EvidenceAttachRequest,
     MaterialLotCreate,
     MaterialLotFilter,
     MaterialLotRead,
@@ -39,12 +40,16 @@ from strata.schemas.organization import (
 )
 from strata.schemas.qualification import (
     AssessmentStatus,
+    DiscoveredPartnerOpportunity,
     HardGateResult,
     InvestigationCreate,
     InvestigationExecutionStatus,
+    InvestigationFilter,
     InvestigationRead,
+    LotDiscoveryResponse,
     MissingFact,
     QualificationAssessmentRead,
+    QualificationAssessRequest,
     QualificationOutcome,
 )
 from strata.schemas.workflow import (
@@ -70,6 +75,7 @@ __all__ = [
     "EvidenceRecordRead",
     "MaterialLotStatus",
     "MaterialTypeInfo",
+    "EvidenceAttachRequest",
     "MaterialLotCreate",
     "MaterialLotUpdate",
     "MaterialLotRead",
@@ -81,7 +87,11 @@ __all__ = [
     "MissingFact",
     "QualificationAssessmentRead",
     "InvestigationCreate",
+    "QualificationAssessRequest",
+    "InvestigationFilter",
     "InvestigationRead",
+    "DiscoveredPartnerOpportunity",
+    "LotDiscoveryResponse",
     "ListingStatus",
     "RFQStatus",
     "ExchangeListingRead",

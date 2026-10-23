@@ -12,18 +12,18 @@ class EvidenceRecord(Base, TimestampMixin):
     __tablename__ = "evidence_records"
 
     evidence_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
     org_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         ForeignKey("organizations.org_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     lot_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
+        String(64),
         ForeignKey("material_lots.lot_id", ondelete="SET NULL"),
         nullable=True,
         index=True,
@@ -53,18 +53,18 @@ class Investigation(Base, TimestampMixin):
     __tablename__ = "investigations"
 
     investigation_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
     org_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         ForeignKey("organizations.org_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     lot_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         ForeignKey("material_lots.lot_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -86,18 +86,18 @@ class QualificationAssessment(Base, TimestampMixin):
     __tablename__ = "qualification_assessments"
 
     assessment_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
     investigation_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
+        String(64),
         ForeignKey("investigations.investigation_id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
     lot_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         ForeignKey("material_lots.lot_id", ondelete="CASCADE"),
         nullable=False,
         index=True,

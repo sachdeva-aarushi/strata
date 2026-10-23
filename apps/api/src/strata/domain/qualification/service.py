@@ -1,7 +1,8 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from strata.core.errors import ResourceNotFoundError, ValidationError
@@ -18,7 +19,11 @@ from strata.domain.qualification.routes import (
     get_candidate_route_by_id,
     get_candidate_routes_for_material,
 )
-from strata.integrations.discovery import DiscoveryProvider, FakeDiscoveryProvider
+from strata.integrations.discovery import (
+    DiscoveryProvider,
+    FakeDiscoveryProvider,
+    get_discovery_provider,
+)
 from strata.integrations.llm import FakeLLMProvider, LLMProvider
 from strata.schemas.evidence import (
     EvidenceProvenance,
@@ -28,13 +33,18 @@ from strata.schemas.evidence import (
     ExtractionMethod,
 )
 from strata.schemas.qualification import (
+    DiscoveredPartnerOpportunity,
     HardGateResult,
     InvestigationExecutionStatus,
     InvestigationRead,
+    LotDiscoveryResponse,
     MissingFact,
     QualificationAssessmentRead,
     QualificationOutcome,
 )
+
+logger = logging.getLogger("strata.qualification.service")
+
 
 
 class ProofPathQualificationEngine:
@@ -272,7 +282,7 @@ class ProofPathQualificationService:
     ) -> None:
         self.db = db
         self.engine = engine or ProofPathQualificationEngine()
-        self.discovery = discovery_provider or FakeDiscoveryProvider()
+        self.discovery = discovery_provider or get_discovery_provider()
 
     def add_evidence(self, payload: EvidenceRecordCreate, org_id: str) -> EvidenceRecordRead:
         """Persists a new evidence claim linked to a tenant organization and optional material lot."""
@@ -309,16 +319,135 @@ class ProofPathQualificationService:
         records = self.db.execute(stmt).scalars().all()
         return [EvidenceRecordRead.model_validate(r) for r in records]
 
+    def discover_partners_and_evidence(
+        self,
+        lot_id: str,
+        org_id: str,
+        candidate_route_ids: Optional[List[str]] = None,
+    ) -> LotDiscoveryResponse:
+        """
+        Executes external discovery to identify potential recovery partners, processors,
+        and reuse opportunities for a material lot.
+        
+        Extracts structured information from discovered sources and normalizes each claim
+        into audit-grade EvidenceRecord entities tagged PUBLICLY_STATED and UNVERIFIED.
+        Connects newly discovered claims to the lot so subsequent assessments can reference them.
+        External provider failures (timeouts, 5xx) are handled gracefully without fabricating results.
+        """
+        lot_stmt = select(MaterialLot).where(
+            MaterialLot.lot_id == lot_id,
+            MaterialLot.org_id == org_id,
+        )
+        lot = self.db.execute(lot_stmt).scalar_one_or_none()
+        if not lot:
+            raise ResourceNotFoundError(
+                f"Material lot '{lot_id}' was not found in your organization scope.",
+                details={"lot_id": lot_id},
+            )
+
+        if candidate_route_ids:
+            routes = []
+            for r_id in candidate_route_ids:
+                r = get_candidate_route_by_id(r_id)
+                if r:
+                    routes.append(r)
+        else:
+            routes = self.discovery.discover_routes(lot.material_type)
+
+        opportunities: List[DiscoveredPartnerOpportunity] = []
+        all_new_evidence: List[EvidenceRecordRead] = []
+
+        # Load existing claims for deduplication
+        existing_stmt = select(EvidenceRecord).where(
+            EvidenceRecord.lot_id == lot_id,
+            EvidenceRecord.org_id == org_id,
+        )
+        existing_records = list(self.db.execute(existing_stmt).scalars().all())
+        existing_keys = {(e.source_url or "", e.claim_text.strip()) for e in existing_records}
+
+        for route in routes:
+            try:
+                claims = self.discovery.fetch_receiver_claims(route)
+            except Exception as exc:
+                logger.warning(
+                    "Discovery lookup failed for route %s (%s): %s. Continuing with empty claims.",
+                    route.route_id,
+                    route.processor_facility_name,
+                    exc,
+                )
+                claims = []
+
+            route_evidence_reads: List[EvidenceRecordRead] = []
+            now = datetime.now(timezone.utc)
+            for claim in claims:
+                key = (claim.source_url or "", claim.claim_text.strip())
+                if key in existing_keys:
+                    continue
+
+                record = EvidenceRecord(
+                    evidence_id=str(uuid.uuid4()),
+                    org_id=org_id,
+                    lot_id=lot_id,
+                    claim_subject=claim.claim_subject or "receiver_capability",
+                    claim_text=claim.claim_text,
+                    source_url=claim.source_url,
+                    source_title=claim.source_title,
+                    source_type=claim.source_type or "web",
+                    retrieved_at=claim.retrieved_at or now,
+                    extraction_method=claim.extraction_method.value if hasattr(claim.extraction_method, "value") else str(claim.extraction_method),
+                    provenance=EvidenceProvenance.PUBLICLY_STATED.value,
+                    verification_state=EvidenceVerificationState.UNVERIFIED.value,
+                    supporting_passage=claim.supporting_passage,
+                    content_hash=claim.content_hash,
+                    document_ref=claim.document_ref,
+                    verified_by=None,
+                    contradicted_by=[],
+                    created_at=now,
+                    updated_at=now,
+                )
+                self.db.add(record)
+                self.db.flush()
+                existing_keys.add(key)
+                ev_read = EvidenceRecordRead.model_validate(record)
+                route_evidence_reads.append(ev_read)
+                all_new_evidence.append(ev_read)
+
+            opp = DiscoveredPartnerOpportunity(
+                route_id=route.route_id,
+                name=route.name,
+                processor_facility_name=route.processor_facility_name,
+                recovery_tier=route.recovery_tier,
+                public_claims_count=len(route_evidence_reads),
+                discovered_evidence=route_evidence_reads,
+            )
+            opportunities.append(opp)
+
+        self.db.commit()
+
+        provider_name = "tinyfish" if "TinyFish" in type(self.discovery).__name__ else "fake"
+        return LotDiscoveryResponse(
+            lot_id=lot_id,
+            material_type=lot.material_type,
+            opportunities=opportunities,
+            new_evidence_count=len(all_new_evidence),
+            evidence_records=all_new_evidence,
+            provider=provider_name,
+            discovered_at=datetime.now(timezone.utc),
+        )
+
     def run_investigation(
         self,
         lot_id: str,
         org_id: str,
         candidate_route_ids: Optional[List[str]] = None,
         notes: Optional[str] = None,
+        run_discovery: bool = False,
     ) -> InvestigationRead:
         """
         Executes a qualification investigation: gathers evidence, identifies candidate routes,
         evaluates deterministic criteria, and persists audit assessments.
+        If run_discovery is True, triggers external discovery to gather receiver capability
+        evidence before deterministic evaluation.
         """
         # 1. Fetch material lot within tenant scope
         lot_stmt = select(MaterialLot).where(
@@ -330,6 +459,14 @@ class ProofPathQualificationService:
             raise ResourceNotFoundError(
                 f"Material lot '{lot_id}' was not found in your organization scope.",
                 details={"lot_id": lot_id},
+            )
+
+        # 1b. Optionally run discovery pipeline to gather receiver evidence
+        if run_discovery:
+            self.discover_partners_and_evidence(
+                lot_id=lot_id,
+                org_id=org_id,
+                candidate_route_ids=candidate_route_ids,
             )
 
         # 2. Gather existing evidence records for this lot
@@ -348,6 +485,7 @@ class ProofPathQualificationService:
                     routes.append(r)
         else:
             routes = self.discovery.discover_routes(lot.material_type)
+
 
         # 4. Create Investigation entity
         investigation_id = str(uuid.uuid4())
@@ -487,3 +625,146 @@ class ProofPathQualificationService:
             )
             for qa in qa_entities
         ]
+
+    def get_assessment_by_id(self, assessment_id: str, org_id: str) -> QualificationAssessmentRead:
+        """Retrieves a single qualification assessment by ID, strictly enforcing organization tenant boundaries."""
+        stmt = (
+            select(QualificationAssessment)
+            .join(MaterialLot, QualificationAssessment.lot_id == MaterialLot.lot_id)
+            .where(
+                QualificationAssessment.assessment_id == assessment_id,
+                MaterialLot.org_id == org_id,
+            )
+        )
+        qa = self.db.execute(stmt).scalar_one_or_none()
+        if not qa:
+            raise ResourceNotFoundError(
+                f"Qualification assessment with ID '{assessment_id}' was not found in your organization scope.",
+                details={"assessment_id": assessment_id},
+            )
+
+        return QualificationAssessmentRead(
+            assessment_id=qa.assessment_id,
+            lot_id=qa.lot_id,
+            candidate_route_id=qa.candidate_route_id,
+            status=QualificationOutcome(qa.status),
+            hard_gate_results=[HardGateResult(**g) for g in qa.hard_gate_results],
+            blocking_conditions=qa.blocking_conditions,
+            missing_facts=[MissingFact(**f) for f in qa.missing_facts],
+            rationale=qa.rationale,
+            next_action=qa.next_action,
+            evidence_refs=qa.evidence_refs,
+            rule_version=qa.rule_version,
+            assessed_at=qa.assessed_at,
+        )
+
+    def list_investigations(
+        self,
+        org_id: str,
+        lot_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> Tuple[List[InvestigationRead], int]:
+        """Lists historical investigation runs belonging to the tenant organization with pagination."""
+        base_stmt = select(Investigation).where(Investigation.org_id == org_id)
+        count_stmt = select(func.count(Investigation.investigation_id)).where(Investigation.org_id == org_id)
+
+        if lot_id:
+            base_stmt = base_stmt.where(Investigation.lot_id == lot_id)
+            count_stmt = count_stmt.where(Investigation.lot_id == lot_id)
+
+        total = self.db.execute(count_stmt).scalar() or 0
+        inv_entities = list(
+            self.db.execute(
+                base_stmt.order_by(Investigation.created_at.desc()).offset(skip).limit(limit)
+            ).scalars().all()
+        )
+
+        items = []
+        for inv in inv_entities:
+            qa_stmt = select(QualificationAssessment).where(
+                QualificationAssessment.investigation_id == inv.investigation_id
+            )
+            qa_entities = self.db.execute(qa_stmt).scalars().all()
+            assessments = [
+                QualificationAssessmentRead(
+                    assessment_id=qa.assessment_id,
+                    lot_id=qa.lot_id,
+                    candidate_route_id=qa.candidate_route_id,
+                    status=QualificationOutcome(qa.status),
+                    hard_gate_results=[HardGateResult(**g) for g in qa.hard_gate_results],
+                    blocking_conditions=qa.blocking_conditions,
+                    missing_facts=[MissingFact(**f) for f in qa.missing_facts],
+                    rationale=qa.rationale,
+                    next_action=qa.next_action,
+                    evidence_refs=qa.evidence_refs,
+                    rule_version=qa.rule_version,
+                    assessed_at=qa.assessed_at,
+                )
+                for qa in qa_entities
+            ]
+            items.append(
+                InvestigationRead(
+                    investigation_id=inv.investigation_id,
+                    org_id=inv.org_id,
+                    lot_id=inv.lot_id,
+                    status=InvestigationExecutionStatus(inv.status),
+                    assessments=assessments,
+                    error_message=inv.error_message,
+                    created_at=inv.created_at,
+                    completed_at=inv.completed_at,
+                )
+            )
+        return items, total
+
+    def get_discovered_opportunities(self, lot_id: str, org_id: str) -> LotDiscoveryResponse:
+        """Retrieves previously discovered partner opportunities and public capability claims for a lot."""
+        lot_stmt = select(MaterialLot).where(
+            MaterialLot.lot_id == lot_id,
+            MaterialLot.org_id == org_id,
+        )
+        lot = self.db.execute(lot_stmt).scalar_one_or_none()
+        if not lot:
+            raise ResourceNotFoundError(
+                f"Material lot '{lot_id}' was not found in your organization scope.",
+                details={"lot_id": lot_id},
+            )
+
+        routes = self.discovery.discover_routes(lot.material_type)
+        ev_stmt = select(EvidenceRecord).where(
+            EvidenceRecord.lot_id == lot_id,
+            EvidenceRecord.org_id == org_id,
+            EvidenceRecord.provenance == EvidenceProvenance.PUBLICLY_STATED.value,
+        ).order_by(EvidenceRecord.retrieved_at.desc())
+        records = list(self.db.execute(ev_stmt).scalars().all())
+        evidence_reads = [EvidenceRecordRead.model_validate(r) for r in records]
+
+        opportunities = []
+        for route in routes:
+            matching = [
+                e for e in evidence_reads
+                if route.processor_facility_name.lower() in (e.source_title or "").lower()
+                or route.processor_facility_name.lower() in e.claim_text.lower()
+            ]
+            opportunities.append(
+                DiscoveredPartnerOpportunity(
+                    route_id=route.route_id,
+                    name=route.name,
+                    processor_facility_name=route.processor_facility_name,
+                    recovery_tier=route.recovery_tier,
+                    public_claims_count=len(matching),
+                    discovered_evidence=matching,
+                )
+            )
+
+        provider_name = "tinyfish" if "TinyFish" in type(self.discovery).__name__ else "fake"
+        return LotDiscoveryResponse(
+            lot_id=lot_id,
+            material_type=lot.material_type,
+            opportunities=opportunities,
+            new_evidence_count=len(evidence_reads),
+            evidence_records=evidence_reads,
+            provider=provider_name,
+            discovered_at=datetime.now(timezone.utc),
+        )
+

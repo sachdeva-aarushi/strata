@@ -12,11 +12,14 @@ from strata.schemas.common import (
     PaginationInfo,
     ResponseEnvelope,
 )
+from strata.schemas.evidence import EvidenceRecordCreate, EvidenceRecordRead
 from strata.schemas.materials import (
+    EvidenceAttachRequest,
     MaterialLotCreate,
     MaterialLotFilter,
     MaterialLotRead,
     MaterialLotStatus,
+    MaterialLotUpdate,
     MaterialTypeInfo,
 )
 
@@ -90,3 +93,73 @@ def list_material_lots(
         ),
         meta=MetaInfo(),
     )
+
+
+@router.patch("/lots/{lot_id}", response_model=ResponseEnvelope[MaterialLotRead])
+@router.put("/lots/{lot_id}", response_model=ResponseEnvelope[MaterialLotRead])
+def update_material_lot(
+    lot_id: str,
+    payload: MaterialLotUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[MaterialLotRead]:
+    """
+    Updates permitted fields on an existing material lot.
+    Preserves identifiers, creation timestamps, and tenant boundaries.
+    """
+    service = MaterialService(db)
+    updated = service.update_lot(lot_id=lot_id, payload=payload, org_id=current_user.org_id)
+    return ResponseEnvelope(data=updated, meta=MetaInfo())
+
+
+@router.post(
+    "/lots/{lot_id}/evidence",
+    response_model=ResponseEnvelope[EvidenceRecordRead],
+    status_code=status.HTTP_201_CREATED,
+)
+def create_lot_evidence(
+    lot_id: str,
+    payload: EvidenceRecordCreate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[EvidenceRecordRead]:
+    """
+    Creates and attaches an audit-grade evidence claim directly to a material lot.
+    Preserves requested provenance and verification state without premature verification.
+    """
+    service = MaterialService(db)
+    record = service.create_lot_evidence(lot_id=lot_id, payload=payload, org_id=current_user.org_id)
+    return ResponseEnvelope(data=record, meta=MetaInfo())
+
+
+@router.get("/lots/{lot_id}/evidence", response_model=ResponseEnvelope[List[EvidenceRecordRead]])
+def list_lot_evidence(
+    lot_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[List[EvidenceRecordRead]]:
+    """Retrieves all evidence records associated with a specific material lot."""
+    service = MaterialService(db)
+    records = service.get_lot_evidence(lot_id=lot_id, org_id=current_user.org_id)
+    return ResponseEnvelope(data=records, meta=MetaInfo())
+
+
+@router.post("/lots/{lot_id}/evidence/attach", response_model=ResponseEnvelope[MaterialLotRead])
+def attach_evidence_to_lot(
+    lot_id: str,
+    payload: EvidenceAttachRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[MaterialLotRead]:
+    """
+    Associates existing evidence records with a target material lot.
+    Guarantees tenant isolation and preserves provenance without altering verification status.
+    """
+    service = MaterialService(db)
+    updated = service.attach_evidence_to_lot(
+        lot_id=lot_id,
+        evidence_ids=payload.evidence_ids,
+        org_id=current_user.org_id,
+    )
+    return ResponseEnvelope(data=updated, meta=MetaInfo())
+
