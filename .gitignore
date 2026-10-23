@@ -24,3 +24,6 @@ __pycache__/
 .venv/
 env/
 venv/
+apps/web/node_modules
+.next/
+*.tsbuildinfo
