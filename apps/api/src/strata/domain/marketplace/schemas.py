@@ -12,7 +12,7 @@ materials domain. Listings only reference the lot by its UUID string.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -75,13 +75,20 @@ class WorkflowEventType(str, Enum):
     RFQ_APPROVED = "rfq_approved"
     RFQ_CANCELLED = "rfq_cancelled"
     OFFER_SUBMITTED = "offer_submitted"
+    OFFER_REVIEWED = "offer_reviewed"
     OFFER_REVISED = "offer_revised"
     OFFER_ACCEPTED = "offer_accepted"
     OFFER_REJECTED = "offer_rejected"
     OFFER_WITHDRAWN = "offer_withdrawn"
+    LISTING_CREATED = "listing_created"
     LISTING_PUBLISHED = "listing_published"
+    LISTING_UPDATED = "listing_updated"
     LISTING_PAUSED = "listing_paused"
     LISTING_WITHDRAWN = "listing_withdrawn"
+    REQUIREMENT_CREATED = "requirement_created"
+    REQUIREMENT_UPDATED = "requirement_updated"
+    REQUIREMENT_DELETED = "requirement_deleted"
+    MATCH_EVALUATED = "match_evaluated"
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +124,23 @@ class ListingCreate(BaseModel):
         return v.lower()
 
 
+class ListingUpdate(BaseModel):
+    """Payload to update an existing marketplace listing."""
+    asking_price_per_unit: Optional[float] = Field(default=None, ge=0)
+    available_quantity: Optional[float] = Field(default=None, gt=0)
+    currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
+    visibility: Optional[ListingVisibility] = None
+    status: Optional[ListingStatus] = None
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    @field_validator("currency")
+    @classmethod
+    def _upper_currency(cls, v: Optional[str]) -> Optional[str]:
+        return v.upper() if v else v
+
+
 class ListingRead(BaseModel):
     """Marketplace listing as returned by the API."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -130,6 +154,17 @@ class ListingRead(BaseModel):
     unit: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: ListingStatus = ListingStatus.DRAFT
+
+    # Enriched material lot and provenance information
+    material_type: Optional[str] = None
+    material_category: Optional[str] = None
+    material_properties: Dict[str, Any] = Field(default_factory=dict)
+    location: Optional[str] = None
+    availability_from: Optional[date] = None
+    availability_to: Optional[date] = None
+    lot_quantity: Optional[float] = None
+    supporting_evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -149,6 +184,9 @@ class BuyerRequirementCreate(BaseModel):
     required_properties: Dict[str, Any] = Field(default_factory=dict)
     prohibited_conditions: List[str] = Field(default_factory=list)
     visibility: ListingVisibility = ListingVisibility.PRIVATE
+    location: Optional[str] = None
+    delivery_requirements: Dict[str, Any] = Field(default_factory=dict)
+    constraints: Dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -164,6 +202,21 @@ class BuyerRequirementCreate(BaseModel):
         if v is not None and min_q is not None and v < min_q:
             raise ValueError("max_quantity cannot be smaller than min_quantity")
         return v
+
+
+class BuyerRequirementUpdate(BaseModel):
+    """Payload to update an existing buyer requirement."""
+    min_quantity: Optional[float] = Field(default=None, ge=0)
+    max_quantity: Optional[float] = Field(default=None, gt=0)
+    target_price_per_unit: Optional[float] = Field(default=None, ge=0)
+    required_properties: Optional[Dict[str, Any]] = None
+    prohibited_conditions: Optional[List[str]] = None
+    visibility: Optional[ListingVisibility] = None
+    location: Optional[str] = None
+    delivery_requirements: Optional[Dict[str, Any]] = None
+    constraints: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
 
 class BuyerRequirementRead(BuyerRequirementCreate):
@@ -285,6 +338,8 @@ class RFQRead(BaseModel):
     status: RFQStatus
     notes: Optional[str] = None
     created_by: str
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
 
@@ -333,6 +388,8 @@ class OfferRead(BaseModel):
     terms: Optional[str] = None
     valid_until: Optional[datetime] = None
     created_by: str
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
 
@@ -342,6 +399,19 @@ class OfferRead(BaseModel):
 # ---------------------------------------------------------------------------
 # Workflow Audit Events
 # ---------------------------------------------------------------------------
+
+class WorkflowEventCreate(BaseModel):
+    """Payload to record an auditable workflow event."""
+    entity_type: str = Field(..., description="listing, rfq, offer, requirement, or match")
+    entity_id: str
+    event_type: WorkflowEventType
+    from_state: Optional[str] = None
+    to_state: str
+    notes: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
 
 class WorkflowEventRead(BaseModel):
     """Auditable state transition event."""
@@ -385,7 +455,7 @@ class WorkflowEventRead(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Cluster Synergy and Batch Aggregation
+# Cluster Synergy and Batch Aggregation (Hitendra)
 # ---------------------------------------------------------------------------
 
 class LotContribution(BaseModel):
