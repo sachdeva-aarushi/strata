@@ -50,6 +50,10 @@ class Facility(Base, TimestampMixin):
     location_country: Mapped[str] = mapped_column(String(2), default="US", nullable=False)
     location_postal_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     cluster_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    city_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    zone_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    processing_capacity_tpa: Mapped[Optional[float]] = mapped_column(Float, default=0.0, nullable=True)
+    facility_type: Mapped[Optional[str]] = mapped_column(String(50), default="generator", nullable=True)
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="facilities")
     material_lots: Mapped[list["MaterialLot"]] = relationship("MaterialLot", back_populates="facility")
