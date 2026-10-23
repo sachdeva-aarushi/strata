@@ -1,5 +1,5 @@
 from typing import List, Optional, Union
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -118,6 +118,55 @@ class Settings(BaseSettings):
     # When True, ProofPath outages/timeouts/bad payloads return a clearly marked mock result
     # instead of an error. Intended for offline development and tests only.
     PROOFPATH_MOCK_FALLBACK: bool = False
+
+    # -------------------------------------------------------------------------
+    # LLM Provider (advisory role: synthesis and explanation only)
+    # -------------------------------------------------------------------------
+    # Supported values: "openai", "azure_openai"
+    # When unset or empty the FakeLLMProvider is used (no external calls).
+    LLM_PROVIDER: Optional[str] = None
+    LLM_API_KEY: Optional[str] = None
+    LLM_MODEL: Optional[str] = None
+    # Optional override for Azure OpenAI or self-hosted endpoints
+    LLM_BASE_URL: Optional[str] = None
+    LLM_TIMEOUT_SECONDS: float = 20.0
+
+    @field_validator(
+        "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL", "LLM_BASE_URL",
+        mode="before",
+    )
+    @classmethod
+    def clean_optional_string(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and isinstance(v, str):
+            cleaned = v.strip()
+            return cleaned if cleaned else None
+        return v
+
+    @property
+    def llm_configured(self) -> bool:
+        """True when a real LLM provider is configured and has a non-empty API key."""
+        return bool(self.LLM_PROVIDER and self.LLM_API_KEY)
+
+    # -------------------------------------------------------------------------
+    # TinyFish — web search and page-fetch provider
+    # -------------------------------------------------------------------------
+    # Obtain a key from https://agent.tinyfish.ai/api-keys
+    TINYFISH_API_KEY: Optional[str] = None
+    TINYFISH_TIMEOUT_SECONDS: float = 15.0
+    TINYFISH_MAX_SEARCH_RESULTS: int = 5
+
+    @field_validator("TINYFISH_API_KEY", mode="before")
+    @classmethod
+    def clean_tinyfish_key(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and isinstance(v, str):
+            cleaned = v.strip()
+            return cleaned if cleaned else None
+        return v
+
+    @property
+    def tinyfish_configured(self) -> bool:
+        """True when a TinyFish API key is available."""
+        return bool(self.TINYFISH_API_KEY)
 
 
 settings = Settings()
