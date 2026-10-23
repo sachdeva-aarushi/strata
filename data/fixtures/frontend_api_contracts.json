@@ -1,0 +1,485 @@
+{
+  "contract_version": "1.0.0",
+  "platform": "STRATA — Industrial Circularity Operating System",
+  "generated_for": "Saishree (Next.js Frontend Engineering)",
+  "standard_envelopes": {
+    "response_envelope": {
+      "data": {},
+      "meta": {
+        "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+        "timestamp": "2026-10-24T02:00:00.000Z"
+      }
+    },
+    "paginated_response_envelope": {
+      "data": [],
+      "pagination": {
+        "total": 42,
+        "page": 1,
+        "per_page": 20,
+        "total_pages": 3,
+        "has_next": true,
+        "has_prev": false
+      },
+      "meta": {
+        "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+        "timestamp": "2026-10-24T02:00:00.000Z"
+      }
+    },
+    "error_envelope": {
+      "error": {
+        "code": "INVALID_STATE_TRANSITION",
+        "message": "Cannot record 'verified_recovered' without prior receipt or processing confirmation ('accepted' or 'processed').",
+        "details": {
+          "lot_id": "lot-a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          "existing_events": ["generated", "shipped"]
+        }
+      },
+      "meta": {
+        "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+        "timestamp": "2026-10-24T02:00:00.000Z"
+      }
+    }
+  },
+  "endpoints": {
+    "impact": {
+      "post_record": {
+        "endpoint": "POST /api/v1/impact/record",
+        "description": "Appends an immutable lifecycle event to the verified impact ledger.",
+        "request_payload": {
+          "lot_id": "lot-e4b2d9a1-8711-4f92-911c-2f96e47b3109",
+          "facility_id": "fac-00000000-0000-0000-0000-000000000001",
+          "event_type": "verified_recovered",
+          "mass_kg": 5000.0,
+          "displaced_material_category": "textiles",
+          "evidence_id": "evid-7c2a11b8-44fa-48ef-b4e1-22941fa11099",
+          "methodology_version": "v1.0"
+        },
+        "response_sample": {
+          "data": {
+            "id": "imp-9a8b7c6d-5e4f-3a2b-1c0d-ef9876543210",
+            "lot_id": "lot-e4b2d9a1-8711-4f92-911c-2f96e47b3109",
+            "organization_id": "org-11111111-1111-1111-1111-111111111111",
+            "facility_id": "fac-00000000-0000-0000-0000-000000000001",
+            "event_type": "verified_recovered",
+            "mass_kg": 5000.0,
+            "displaced_material_category": "textiles",
+            "co2e_avoided_kg": 71000.0,
+            "methodology_version": "v1.0",
+            "factor_source": "EPA WARM v15 / WRAP UK Textile Carbon Footprint",
+            "verification_status": "verified_recovered",
+            "evidence_id": "evid-7c2a11b8-44fa-48ef-b4e1-22941fa11099",
+            "uncertainty_rating": "LOW",
+            "boundary_assumptions": "Pre-consumer textile fiber recovery vs virgin cotton/polyester synthesis; 100% landfill diversion.",
+            "created_at": "2026-10-24T02:05:00.000Z"
+          },
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        }
+      },
+      "get_summary": {
+        "endpoint": "GET /api/v1/impact/summary?facility_id=fac-00000000-0000-0000-0000-000000000001",
+        "description": "Returns mass balance segregated across lifecycle stages to guarantee non-double-counting.",
+        "response_sample": {
+          "data": {
+            "organization_id": "org-11111111-1111-1111-1111-111111111111",
+            "facility_id": "fac-00000000-0000-0000-0000-000000000001",
+            "mass_balance": {
+              "organization_id": "org-11111111-1111-1111-1111-111111111111",
+              "facility_id": "fac-00000000-0000-0000-0000-000000000001",
+              "total_generated_kg": 25000.0,
+              "total_offered_kg": 18000.0,
+              "total_shipped_kg": 15000.0,
+              "total_accepted_kg": 15000.0,
+              "total_processed_kg": 12000.0,
+              "total_verified_recovered_kg": 12000.0,
+              "total_landfill_avoided_kg": 12000.0,
+              "total_co2e_avoided_kg": 170400.0,
+              "net_in_pipeline_kg": 13000.0,
+              "stage_counts": {
+                "generated": 5,
+                "offered": 4,
+                "shipped": 3,
+                "accepted": 3,
+                "processed": 2,
+                "verified_recovered": 2
+              },
+              "category_breakdown": {
+                "textiles": {
+                  "generated": 20000.0,
+                  "verified_recovered": 12000.0
+                },
+                "metallics": {
+                  "generated": 5000.0,
+                  "verified_recovered": 0.0
+                }
+              },
+              "generated_at": "2026-10-24T02:05:00.000Z"
+            },
+            "records": [
+              {
+                "id": "imp-9a8b7c6d-5e4f-3a2b-1c0d-ef9876543210",
+                "lot_id": "lot-e4b2d9a1-8711-4f92-911c-2f96e47b3109",
+                "organization_id": "org-11111111-1111-1111-1111-111111111111",
+                "facility_id": "fac-00000000-0000-0000-0000-000000000001",
+                "event_type": "verified_recovered",
+                "mass_kg": 5000.0,
+                "displaced_material_category": "textiles",
+                "co2e_avoided_kg": 71000.0,
+                "methodology_version": "v1.0",
+                "factor_source": "EPA WARM v15 / WRAP UK Textile Carbon Footprint",
+                "verification_status": "verified_recovered",
+                "evidence_id": "evid-7c2a11b8-44fa-48ef-b4e1-22941fa11099",
+                "uncertainty_rating": "LOW",
+                "boundary_assumptions": "Pre-consumer textile fiber recovery vs virgin cotton/polyester synthesis; 100% landfill diversion.",
+                "created_at": "2026-10-24T02:05:00.000Z"
+              }
+            ],
+            "generated_at": "2026-10-24T02:05:00.000Z"
+          },
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        }
+      },
+      "post_calculate": {
+        "endpoint": "POST /api/v1/impact/calculate",
+        "description": "Simulates environmental savings before formal ledger logging.",
+        "request_payload": {
+          "mass_kg": 2500.0,
+          "material_category": "textiles",
+          "methodology_version": "v1.0"
+        },
+        "response_sample": {
+          "data": {
+            "mass_kg": 2500.0,
+            "material_category": "textiles",
+            "landfill_avoided_kg": 2500.0,
+            "co2e_avoided_kg": 35500.0,
+            "factor_used": 14.2,
+            "factor_source": "EPA WARM v15 / WRAP UK Textile Carbon Footprint",
+            "methodology_version": "v1.0",
+            "uncertainty_rating": "LOW",
+            "boundary_assumptions": "Pre-consumer textile fiber recovery vs virgin cotton/polyester synthesis; 100% landfill diversion.",
+            "calculated_at": "2026-10-24T02:05:00.000Z"
+          },
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        }
+      },
+      "get_methods": {
+        "endpoint": "GET /api/v1/impact/methods",
+        "description": "Returns documented carbon abatement factors and data sources.",
+        "response_sample": {
+          "data": [
+            {
+              "methodology_version": "v1.0",
+              "name": "Strata Circular Displacement & Landfill Avoidance Framework",
+              "description": "Standardized carbon abatement and landfill displacement model using EPA WARM, DEFRA, and EcoInvent cradle-to-gate substitution methodologies.",
+              "factors_by_category": {
+                "textiles": {
+                  "factor_kg_co2e_per_kg": 14.2,
+                  "source": "EPA WARM v15 / WRAP UK Textile Carbon Footprint",
+                  "uncertainty_rating": "LOW",
+                  "assumptions": "Pre-consumer textile fiber recovery vs virgin cotton/polyester synthesis; 100% landfill diversion."
+                },
+                "metallics": {
+                  "factor_kg_co2e_per_kg": 8.5,
+                  "source": "International Aluminium Institute 2023 / DEFRA GHG Conversion Factors",
+                  "uncertainty_rating": "LOW",
+                  "assumptions": "Secondary metal scrap remelt vs primary bauxite/alumina Bayer process smelting."
+                },
+                "chemicals": {
+                  "factor_kg_co2e_per_kg": 2.1,
+                  "source": "EcoInvent v3.9 / American Chemistry Council",
+                  "uncertainty_rating": "LOW",
+                  "assumptions": "Spent solvent fractional distillation vs virgin fossil petrochemical synthesis."
+                },
+                "polymers": {
+                  "factor_kg_co2e_per_kg": 1.8,
+                  "source": "Association of Plastic Recyclers / EPA WARM",
+                  "uncertainty_rating": "MEDIUM",
+                  "assumptions": "Mechanical flake reprocessing vs virgin naphtha cracking and polymerisation."
+                },
+                "biomass": {
+                  "factor_kg_co2e_per_kg": 0.9,
+                  "source": "IPCC Guidelines for National Greenhouse Gas Inventories",
+                  "uncertainty_rating": "MEDIUM",
+                  "assumptions": "Controlled composting/anaerobic digestion vs fugitive landfill methane emissions."
+                },
+                "minerals": {
+                  "factor_kg_co2e_per_kg": 0.4,
+                  "source": "European Aggregates Association LCA Benchmark",
+                  "uncertainty_rating": "LOW",
+                  "assumptions": "Recycled aggregate crushing vs primary quarrying and crushing."
+                }
+              }
+            }
+          ],
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        }
+      }
+    },
+    "municipal": {
+      "get_flows": {
+        "endpoint": "GET /api/v1/municipal/flows?city_id=surat-metropolitan-region&zone_id=pandesara-industrial-estate",
+        "description": "Returns privacy-preserved material flows across circularity lifecycle stages.",
+        "response_sample_disclosed": {
+          "data": {
+            "city_id": "surat-metropolitan-region",
+            "zone_id": "pandesara-industrial-estate",
+            "material_category": "textiles",
+            "facility_cohort_count": 8,
+            "cohort_suppressed": false,
+            "suppression_reason": null,
+            "flows": {
+              "generated_tonnage": 450.0,
+              "offered_tonnage": 320.0,
+              "shipped_tonnage": 280.0,
+              "accepted_tonnage": 270.0,
+              "processed_tonnage": 240.0,
+              "verified_recovered_tonnage": 240.0,
+              "by_material_category": {
+                "textiles": 450.0
+              }
+            },
+            "provenance": "real_verified",
+            "generated_at": "2026-10-24T02:05:00.000Z"
+          },
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        },
+        "response_sample_suppressed": {
+          "data": {
+            "city_id": "surat-metropolitan-region",
+            "zone_id": "rural-zone-south",
+            "material_category": null,
+            "facility_cohort_count": null,
+            "cohort_suppressed": true,
+            "suppression_reason": "Cohort suppression active: fewer than 3 distinct reporting facilities in this zone (found 2). Metrics masked to prevent commercial re-identification.",
+            "flows": null,
+            "provenance": "real_verified",
+            "generated_at": "2026-10-24T02:05:00.000Z"
+          },
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        }
+      },
+      "get_capacity_gaps": {
+        "endpoint": "GET /api/v1/municipal/capacity-gaps?city_id=surat-metropolitan-region",
+        "description": "Compares byproduct generation against verified local processing capacity by zone.",
+        "response_sample": {
+          "data": {
+            "city_id": "surat-metropolitan-region",
+            "total_city_generation": 2850.0,
+            "total_city_capacity": 2100.0,
+            "net_city_balance": -750.0,
+            "overall_status": "DEFICIT_HOTSPOT",
+            "zones": [
+              {
+                "zone_id": "pandesara-industrial-estate",
+                "cohort_suppressed": false,
+                "facility_count": 14,
+                "generation_tonnage": 1800.0,
+                "processing_capacity_tonnage": 900.0,
+                "net_balance_tonnage": -900.0,
+                "gap_status": "DEFICIT_HOTSPOT",
+                "top_deficit_categories": ["textiles", "polymers"]
+              },
+              {
+                "zone_id": "sachin-gidc-cluster",
+                "cohort_suppressed": false,
+                "facility_count": 9,
+                "generation_tonnage": 850.0,
+                "processing_capacity_tonnage": 1150.0,
+                "net_balance_tonnage": 300.0,
+                "gap_status": "SURPLUS_CAPACITY",
+                "top_deficit_categories": ["metallics"]
+              },
+              {
+                "zone_id": "rural-zone-south",
+                "cohort_suppressed": true,
+                "facility_count": null,
+                "generation_tonnage": null,
+                "processing_capacity_tonnage": null,
+                "net_balance_tonnage": null,
+                "gap_status": "SUPPRESSED",
+                "top_deficit_categories": []
+              }
+            ],
+            "provenance": "real_verified",
+            "generated_at": "2026-10-24T02:05:00.000Z"
+          },
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        }
+      },
+      "get_indicators": {
+        "endpoint": "GET /api/v1/municipal/indicators?city_id=surat-metropolitan-region",
+        "description": "Zone-level and city-wide material density and active participant counts.",
+        "response_sample": {
+          "data": {
+            "city_id": "surat-metropolitan-region",
+            "total_active_zones": 3,
+            "total_city_facilities": 25,
+            "total_city_tonnage": 2850.0,
+            "city_tonnage_by_category": {
+              "textiles": 2200.0,
+              "metallics": 450.0,
+              "chemicals": 200.0
+            },
+            "zones": [
+              {
+                "zone_id": "pandesara-industrial-estate",
+                "cohort_suppressed": false,
+                "active_facility_count": 14,
+                "total_tonnage": 1800.0,
+                "top_categories": ["textiles", "polymers"],
+                "tonnage_by_category": {
+                  "textiles": 1500.0,
+                  "polymers": 300.0
+                }
+              },
+              {
+                "zone_id": "rural-zone-south",
+                "cohort_suppressed": true,
+                "active_facility_count": null,
+                "total_tonnage": null,
+                "top_categories": [],
+                "tonnage_by_category": {}
+              }
+            ],
+            "provenance": "real_verified",
+            "generated_at": "2026-10-24T02:05:00.000Z"
+          },
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        }
+      }
+    },
+    "cluster": {
+      "get_synergies": {
+        "endpoint": "GET /api/v1/marketplace/cluster/{cluster_id}/synergies?requirement_id={req_id}",
+        "description": "Calculates multi-lot batch aggregation proposals meeting buyer quantity thresholds.",
+        "response_sample": {
+          "data": [
+            {
+              "proposal_id": "prop-4a2b1c8e-7d6f-4321-b0e2-998877665544",
+              "requirement_id": "req-11111111-2222-3333-4444-555555555555",
+              "cluster_id": "cluster-surat-textile-corridor",
+              "lots": [
+                {
+                  "lot_id": "lot-alpha-001",
+                  "listing_id": "list-alpha-001",
+                  "organization_id": "org-seller-1",
+                  "facility_id": "fac-seller-1",
+                  "quantity": 300.0,
+                  "unit": "kg",
+                  "material_type": "cotton-blend-offcuts",
+                  "material_category": "textiles",
+                  "declared_attributes": {
+                    "cotton_pct": 80.0,
+                    "polyester_pct": 20.0,
+                    "moisture_pct": 8.0
+                  }
+                },
+                {
+                  "lot_id": "lot-beta-002",
+                  "listing_id": "list-beta-002",
+                  "organization_id": "org-seller-2",
+                  "facility_id": "fac-seller-2",
+                  "quantity": 350.0,
+                  "unit": "kg",
+                  "material_type": "cotton-blend-offcuts",
+                  "material_category": "textiles",
+                  "declared_attributes": {
+                    "cotton_pct": 75.0,
+                    "polyester_pct": 25.0,
+                    "moisture_pct": 12.0
+                  }
+                }
+              ],
+              "total_quantity": 650.0,
+              "unit": "kg",
+              "target_min_quantity": 500.0,
+              "composite_attributes": {
+                "cotton_pct": 77.31,
+                "polyester_pct": 22.69,
+                "moisture_pct": 10.15
+              },
+              "quality_variance_warnings": [],
+              "created_at": "2026-10-24T02:05:00.000Z"
+            }
+          ],
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        }
+      },
+      "post_logistics_estimate": {
+        "endpoint": "POST /api/v1/marketplace/cluster/logistics-estimate",
+        "description": "Calculates indicative multi-stop collection milk-run distance, tariff in INR, and CO2 emissions.",
+        "request_payload": {
+          "lot_ids": ["lot-alpha-001", "lot-beta-002"],
+          "destination_facility_id": "fac-central-hub-01",
+          "rate_per_km_tonne": 12.5
+        },
+        "response_sample": {
+          "data": {
+            "lot_ids": ["lot-alpha-001", "lot-beta-002"],
+            "destination_facility_id": "fac-central-hub-01",
+            "total_tonnage": 0.65,
+            "total_distance_km": 75.0,
+            "rate_per_km_tonne": 12.5,
+            "estimated_transport_cost_inr": 609.38,
+            "estimated_transport_emissions_kg_co2e": 5.12,
+            "currency": "INR",
+            "methodology": "indicative_milk_run_v1",
+            "created_at": "2026-10-24T02:05:00.000Z"
+          },
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        }
+      },
+      "get_indicators": {
+        "endpoint": "GET /api/v1/marketplace/cluster/{cluster_id}/indicators",
+        "description": "Aggregated cluster circularity indicators.",
+        "response_sample": {
+          "data": {
+            "cluster_id": "cluster-surat-textile-corridor",
+            "active_listings_count": 18,
+            "total_available_tonnage": 142.5,
+            "tonnage_by_category": {
+              "textiles": 115.0,
+              "metallics": 27.5
+            },
+            "potential_aggregation_opportunities": 4,
+            "generated_at": "2026-10-24T02:05:00.000Z"
+          },
+          "meta": {
+            "request_id": "01944111-a5f1-7c9b-8f12-9c3f4e1d5a7b",
+            "timestamp": "2026-10-24T02:05:00.000Z"
+          }
+        }
+      }
+    }
+  }
+}
