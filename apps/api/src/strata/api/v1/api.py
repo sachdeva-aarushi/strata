@@ -31,4 +31,3 @@ api_v1_router.include_router(municipal.router)
 
 # Include verified impact ledger router (accessible via /api/v1/impact)
 api_v1_router.include_router(impact.router)
-

@@ -460,3 +460,15 @@ class ClusterSummary(BaseModel):
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# Re-export municipal intelligence schemas
+from strata.schemas.municipal import (  # noqa: E402
+    CapacityGapReport,
+    DataProvenanceLabel,
+    LifecycleFlowBreakdown,
+    MunicipalFlowReport,
+    MunicipalGeographicSummary,
+    ZoneGapIndicator,
+    ZoneGeographicIndicator,
+)
