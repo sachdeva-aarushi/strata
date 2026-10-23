@@ -1,6 +1,14 @@
 from fastapi import APIRouter
-from strata.api.v1.routers import health, marketplace, materials, prevention, qualification
-from strata.api.v1.routers import exchange, health, marketplace, materials, prevention, qualification, municipal
+from strata.api.v1.routers import (
+    exchange,
+    health,
+    impact,
+    marketplace,
+    materials,
+    municipal,
+    prevention,
+    qualification,
+)
 
 api_v1_router = APIRouter()
 
@@ -28,3 +36,5 @@ api_v1_router.include_router(prevention.router)
 # Include municipal & city intelligence router (accessible via /api/v1/municipal)
 api_v1_router.include_router(municipal.router)
 
+# Include verified impact ledger router (accessible via /api/v1/impact)
+api_v1_router.include_router(impact.router)

@@ -69,6 +69,7 @@ def init_db() -> None:
     import strata.domain.materials.models  # noqa: F401
     import strata.domain.qualification.models  # noqa: F401
     import strata.domain.marketplace.models  # noqa: F401
+    import strata.domain.impact.models  # noqa: F401
 
     url = settings.effective_database_url
     target_summary = url.split("@")[-1] if "@" in url else url

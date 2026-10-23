@@ -32,6 +32,7 @@ def setup_database():
     import strata.domain.materials.models  # noqa: F401
     import strata.domain.qualification.models  # noqa: F401
     import strata.domain.marketplace.models  # noqa: F401
+    import strata.domain.impact.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     yield
