@@ -532,117 +532,13 @@ class ClusterSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ---------------------------------------------------------------------------
-# Matching and Compatibility Contracts (Aarushi - Circular Exchange)
-# ---------------------------------------------------------------------------
-
-class MatchEligibility(str, Enum):
-    """Technical and commercial candidate eligibility status."""
-    ELIGIBLE = "eligible"
-    CONDITIONAL = "conditional"
-    INELIGIBLE = "ineligible"
-
-
-class MatchCandidateRead(BaseModel):
-    """A matched listing candidate with compatibility score and ProofPath qualification."""
-    listing: ListingRead
-    match_score: float = Field(..., ge=0.0, le=100.0, description="Compatibility score (0-100). Hard gates cap this at 0.0.")
-    eligibility: MatchEligibility
-    compatibility_reasons: List[str] = Field(default_factory=list)
-    incompatibilities: List[str] = Field(default_factory=list, description="Violated hard constraints or hard gates")
-    missing_information: List[str] = Field(default_factory=list, description="Missing tests, certifications, or properties")
-    distance_km: Optional[float] = None
-    logistics_summary: Optional[Dict[str, Any]] = None
-    qualification_details: Optional[Dict[str, Any]] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class BuyerRequirementMatchesResponse(BaseModel):
-    """Structured candidate matching response for a buyer requirement."""
-    requirement_id: str
-    total_candidates_evaluated: int
-    eligible_count: int
-    conditional_count: int
-    ineligible_count: int
-    matches: List[MatchCandidateRead]
-
-
-# ---------------------------------------------------------------------------
-# Logistics Comparison Contracts (Aarushi - Circular Exchange)
-# ---------------------------------------------------------------------------
-
-class FreightOption(BaseModel):
-    """A transport option comparison breakdown."""
-    mode: str
-    mode_name: str
-    estimated_cost_usd: float
-    cost_per_unit: float
-    estimated_duration_days: float
-    estimated_emissions_kg_co2e: float
-    is_estimated: bool = True
-    disclaimer: str = "Indicative estimate based on regional freight averages. Confirm with carrier."
-
-
-class LogisticsComparisonRequest(BaseModel):
-    """Request to compare freight transport options."""
-    origin_facility_id: Optional[str] = None
-    destination_facility_id: Optional[str] = None
-    origin_location: Optional[str] = None
-    destination_location: Optional[str] = None
-    quantity: float = Field(..., gt=0)
-    unit: str = "kg"
-    material_type: Optional[str] = None
-
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-
-class LogisticsComparisonResponse(BaseModel):
-    """Freight comparison results across available modes."""
-    distance_km: float
-    is_distance_estimated: bool = True
-    quantity: float
-    unit: str
-    options: List[FreightOption]
-    summary: str
-    methodology: str = "indicative_freight_emissions_and_cost_model"
-
-
-# ---------------------------------------------------------------------------
-# Cluster and City Indicators Contracts (Aarushi - Circular Exchange)
-# ---------------------------------------------------------------------------
-
-class MaterialCategoryVolume(BaseModel):
-    """Aggregated volume and listings for a material category."""
-    category: str
-    active_listings_count: int
-    total_quantity: float
-    unit: str
-
-
-class ClusterIndicatorsResponse(BaseModel):
-    """Aggregated circularity and exchange indicators across the industrial cluster."""
-    cluster_id: Optional[str] = None
-    as_of: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    is_estimated: bool = False
-    source: str = "persisted_marketplace_records"
-    total_active_listings: int
-    total_active_buyer_requirements: int
-    total_active_rfqs: int
-    completed_exchanges_count: int
-    supply_by_category: List[MaterialCategoryVolume]
-    demand_by_category: List[MaterialCategoryVolume]
-    top_materials: List[Dict[str, Any]]
-    circularity_rate_pct: Optional[float] = None
-
-
-class CityIndicatorsResponse(BaseModel):
-    """Aggregated municipal-level material prevention and circularity indicators."""
-    city: str = "Greater Industrial Metro"
-    as_of: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    participating_facilities_count: int
-    diverted_material_tonnes: float
-    active_recovery_routes_count: int
-    landfill_diversion_rate_pct: float
-    is_estimated: bool = True
-    methodology: str = "facility_reporting_and_exchange_aggregated_metrics"
+# Re-export municipal intelligence schemas
+from strata.schemas.municipal import (  # noqa: E402
+    CapacityGapReport,
+    DataProvenanceLabel,
+    LifecycleFlowBreakdown,
+    MunicipalFlowReport,
+    MunicipalGeographicSummary,
+    ZoneGapIndicator,
+    ZoneGeographicIndicator,
+)
