@@ -1,12 +1,24 @@
 from fastapi.testclient import TestClient
 
 
-def _create_test_lot(client: TestClient, org_headers: dict, material_type: str, attrs: dict, quantity: float = 2000.0) -> str:
+from typing import Optional
+
+
+def _create_test_lot(
+    client: TestClient,
+    org_headers: dict,
+    material_type: str,
+    attrs: dict,
+    quantity: float = 2000.0,
+    unit: Optional[str] = None,
+) -> str:
     """Helper to create a material lot for qualification testing."""
+    if unit is None:
+        unit = "litre" if material_type in ("spent-isopropanol", "glycol-purge") else "kg"
     payload = {
         "material_type": material_type,
         "quantity": quantity,
-        "unit": "kg",
+        "unit": unit,
         "facility_id": "fac-00000000-0000-0000-0000-000000000001",
         "availability_from": "2026-11-01",
         "availability_to": "2026-12-01",
@@ -243,3 +255,203 @@ def test_investigation_tenant_isolation(client: TestClient, org_headers: dict, o
     )
     assert resp.status_code == 404
     assert "not found" in resp.json()["error"]["message"].lower()
+
+
+def test_direct_lot_qualification_assess_endpoint(client: TestClient, org_headers: dict):
+    """Verifies POST /api/v1/lots/{lot_id}/qualification/assess and GET /api/v1/lots/{lot_id}/qualification."""
+    lot_id = _create_test_lot(
+        client,
+        org_headers,
+        material_type="spent-isopropanol",
+        attrs={"water_content_pct": 2.0, "is_halogenated": False},
+        quantity=500.0,
+    )
+
+    # 1. Request direct assessment on lot
+    assess_resp = client.post(
+        f"/api/v1/lots/{lot_id}/qualification/assess",
+        json={"notes": "Direct lot qualification assessment test"},
+        headers=org_headers,
+    )
+    assert assess_resp.status_code == 201
+    inv_data = assess_resp.json()["data"]
+    assert inv_data["lot_id"] == lot_id
+    assert inv_data["status"] == "completed"
+    assert len(inv_data["assessments"]) >= 1
+
+    # 2. Retrieve assessments for lot via /lots/{lot_id}/qualification
+    get_resp = client.get(f"/api/v1/lots/{lot_id}/qualification", headers=org_headers)
+    assert get_resp.status_code == 200
+    assessments = get_resp.json()["data"]
+    assert len(assessments) >= 1
+    assert assessments[0]["lot_id"] == lot_id
+
+
+def test_get_single_qualification_assessment_by_id(client: TestClient, org_headers: dict, other_org_headers: dict):
+    """Verifies retrieval of individual assessment by ID and enforces tenant boundary."""
+    lot_id = _create_test_lot(
+        client,
+        org_headers,
+        material_type="aluminum-scrap",
+        attrs={"is_hazardous": False, "oil_contamination_pct": 0.2},
+        quantity=1200.0,
+    )
+
+    inv_resp = client.post(
+        "/api/v1/investigations",
+        json={"lot_id": lot_id, "candidate_route_ids": ["route-secondary-aluminum-smelter"]},
+        headers=org_headers,
+    )
+    assessment_id = inv_resp.json()["data"]["assessments"][0]["assessment_id"]
+
+    # Tenant retrieves assessment
+    get_resp = client.get(f"/api/v1/qualification/assessments/{assessment_id}", headers=org_headers)
+    assert get_resp.status_code == 200
+    qa_data = get_resp.json()["data"]
+    assert qa_data["assessment_id"] == assessment_id
+    assert qa_data["candidate_route_id"] == "route-secondary-aluminum-smelter"
+
+    # Other tenant attempts to retrieve -> 404
+    other_resp = client.get(f"/api/v1/qualification/assessments/{assessment_id}", headers=other_org_headers)
+    assert other_resp.status_code == 404
+    assert other_resp.json()["error"]["code"] == "RESOURCE_NOT_FOUND"
+
+
+def test_list_investigations_pagination_and_filter(client: TestClient, org_headers: dict):
+    """Verifies GET /api/v1/investigations with pagination and lot_id filter."""
+    lot_id = _create_test_lot(
+        client,
+        org_headers,
+        material_type="post-industrial-polypropylene",
+        attrs={"melt_flow_index": 12.0},
+        quantity=1000.0,
+    )
+
+    # Run 2 investigations for this lot
+    client.post("/api/v1/investigations", json={"lot_id": lot_id, "notes": "Run 1"}, headers=org_headers)
+    client.post("/api/v1/investigations", json={"lot_id": lot_id, "notes": "Run 2"}, headers=org_headers)
+
+    # List with lot_id filter and pagination
+    list_resp = client.get(f"/api/v1/investigations?lot_id={lot_id}&page=1&page_size=10", headers=org_headers)
+    assert list_resp.status_code == 200
+    body = list_resp.json()
+    assert "pagination" in body
+    assert body["pagination"]["total"] >= 2
+    assert len(body["data"]) >= 2
+    assert all(inv["lot_id"] == lot_id for inv in body["data"])
+
+
+def test_discovery_pipeline_and_evidence_storage(client: TestClient, org_headers: dict):
+    """
+    Verifies that running discovery identifies potential recovery partners,
+    extracts structured capability claims with provenance PUBLICLY_STATED and UNVERIFIED,
+    and persists them into the evidence database table.
+    """
+    lot_id = _create_test_lot(
+        client,
+        org_headers,
+        material_type="aluminum-scrap",
+        attrs={"oil_contamination_pct": 0.5},
+        quantity=2500.0,
+    )
+
+    # 1. Trigger discovery
+    disc_resp = client.post(f"/api/v1/lots/{lot_id}/discovery", headers=org_headers)
+    assert disc_resp.status_code == 200
+    disc_data = disc_resp.json()["data"]
+    assert disc_data["lot_id"] == lot_id
+    assert disc_data["material_type"] == "aluminum-scrap"
+    assert len(disc_data["opportunities"]) >= 1
+
+    # Check partner opportunity fields
+    opp = disc_data["opportunities"][0]
+    assert opp["route_id"] is not None
+    assert opp["processor_facility_name"] is not None
+    assert opp["recovery_tier"] is not None
+
+    # Check that discovered evidence has explicit provenance and unverified state
+    if disc_data["new_evidence_count"] > 0:
+        claim = disc_data["evidence_records"][0]
+        assert claim["lot_id"] == lot_id
+        assert claim["provenance"] == "publicly_stated"
+        assert claim["verification_state"] == "unverified"
+        assert claim["source_type"] == "web"
+        assert claim["retrieved_at"] is not None
+
+    # 2. Verify evidence records are retrievable from the lot's evidence list
+    ev_resp = client.get(f"/api/v1/lots/{lot_id}/evidence", headers=org_headers)
+    assert ev_resp.status_code == 200
+    lot_evidence = ev_resp.json()["data"]
+    assert len(lot_evidence) >= disc_data["new_evidence_count"]
+
+
+def test_discovery_connects_to_subsequent_assessment(client: TestClient, org_headers: dict):
+    """
+    Verifies that running discovery persists evidence records that are
+    subsequently loaded and referenced in a ProofPath qualification assessment.
+    """
+    lot_id = _create_test_lot(
+        client,
+        org_headers,
+        material_type="spent-isopropanol",
+        attrs={"water_content_pct": 2.5},
+        quantity=800.0,
+    )
+
+    # 1. Run discovery first
+    disc_resp = client.post(f"/api/v1/lots/{lot_id}/discovery", headers=org_headers)
+    assert disc_resp.status_code == 200
+    new_evidence = disc_resp.json()["data"]["evidence_records"]
+    new_ev_ids = [e["evidence_id"] for e in new_evidence]
+
+    # 2. Run qualification assessment on the lot
+    assess_resp = client.post(
+        f"/api/v1/lots/{lot_id}/qualification/assess",
+        json={"notes": "Testing post-discovery assessment"},
+        headers=org_headers,
+    )
+    assert assess_resp.status_code == 201
+    assessments = assess_resp.json()["data"]["assessments"]
+    assert len(assessments) >= 1
+
+    # Verify that the newly discovered evidence IDs are included in the assessment's evidence_refs
+    all_evidence_refs = set()
+    for a in assessments:
+        all_evidence_refs.update(a["evidence_refs"])
+    for ev_id in new_ev_ids:
+        assert ev_id in all_evidence_refs
+
+
+def test_discovery_failure_graceful_handling(client: TestClient, org_headers: dict, monkeypatch):
+    """
+    Verifies that if the discovery provider throws an exception (e.g. timeout / network error),
+    the system handles it gracefully, logs the error, returns empty claims without crashing,
+    and never fabricates fake claims.
+    """
+    lot_id = _create_test_lot(
+        client,
+        org_headers,
+        material_type="aluminum-scrap",
+        attrs={"is_hazardous": False},
+        quantity=1000.0,
+    )
+
+    from strata.integrations.discovery import FakeDiscoveryProvider
+
+    def failing_fetch(self, route):
+        raise TimeoutError("Simulated external discovery service timeout")
+
+    monkeypatch.setattr(FakeDiscoveryProvider, "fetch_receiver_claims", failing_fetch)
+
+    # Execute discovery despite provider failure
+    resp = client.post(f"/api/v1/lots/{lot_id}/discovery", headers=org_headers)
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["lot_id"] == lot_id
+    assert data["new_evidence_count"] == 0
+    assert len(data["evidence_records"]) == 0
+    # Opportunities still cataloged from taxonomy, but zero fabricated claims
+    for opp in data["opportunities"]:
+        assert opp["public_claims_count"] == 0
+        assert len(opp["discovered_evidence"]) == 0
+

@@ -75,6 +75,14 @@ class InvestigationCreate(BaseModel):
     lot_id: str = Field(..., description="Material lot UUID to evaluate")
     candidate_route_ids: Optional[List[str]] = Field(default=None, description="Optional route IDs to constrain evaluation to")
     notes: Optional[str] = Field(default=None, description="Context or investigation directive")
+    run_discovery: bool = Field(default=False, description="Whether to execute external partner and capability discovery before evaluation")
+
+
+class QualificationAssessRequest(BaseModel):
+    """Request payload for direct qualification assessment of a material lot."""
+    candidate_route_ids: Optional[List[str]] = Field(default=None, description="Optional route IDs to constrain evaluation to")
+    notes: Optional[str] = Field(default=None, description="Context or assessment directive")
+    run_discovery: bool = Field(default=False, description="Whether to execute external partner and capability discovery before evaluation")
 
 
 class InvestigationRead(BaseModel):
@@ -89,4 +97,34 @@ class InvestigationRead(BaseModel):
     completed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DiscoveredPartnerOpportunity(BaseModel):
+    """Potential recovery partner or processor route identified through discovery."""
+    route_id: str
+    name: str
+    processor_facility_name: str
+    recovery_tier: str
+    public_claims_count: int = 0
+    discovered_evidence: List[Any] = Field(default_factory=list)
+
+
+class LotDiscoveryResponse(BaseModel):
+    """Results of an external discovery run for a material lot."""
+    lot_id: str
+    material_type: str
+    opportunities: List[DiscoveredPartnerOpportunity] = Field(default_factory=list)
+    new_evidence_count: int = 0
+    evidence_records: List[Any] = Field(default_factory=list)
+    provider: str = Field(default="fake", description="Discovery provider used: 'tinyfish' or 'fake'")
+    discovered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InvestigationFilter(BaseModel):
+    """Query parameters for listing historical investigations."""
+    lot_id: Optional[str] = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
 

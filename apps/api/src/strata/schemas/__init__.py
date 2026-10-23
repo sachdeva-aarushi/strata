@@ -40,12 +40,16 @@ from strata.schemas.organization import (
 )
 from strata.schemas.qualification import (
     AssessmentStatus,
+    DiscoveredPartnerOpportunity,
     HardGateResult,
     InvestigationCreate,
     InvestigationExecutionStatus,
+    InvestigationFilter,
     InvestigationRead,
+    LotDiscoveryResponse,
     MissingFact,
     QualificationAssessmentRead,
+    QualificationAssessRequest,
     QualificationOutcome,
 )
 from strata.schemas.workflow import (
@@ -83,7 +87,11 @@ __all__ = [
     "MissingFact",
     "QualificationAssessmentRead",
     "InvestigationCreate",
+    "QualificationAssessRequest",
+    "InvestigationFilter",
     "InvestigationRead",
+    "DiscoveredPartnerOpportunity",
+    "LotDiscoveryResponse",
     "ListingStatus",
     "RFQStatus",
     "ExchangeListingRead",
