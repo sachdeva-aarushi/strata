@@ -198,17 +198,23 @@ rule_version       string               Version of the qualification rule set ap
 assessed_at        string (ISO datetime)
 ```
 
-**AssessmentStatus enum:**
+**QualificationOutcome enum (Authoritative Qualification Decisions):**
 ```
-supported          No blocking rule; required evidence meets threshold
-conditional        One or more facts missing or uncertain; route is possible pending verification
-unsupported        Hard incompatibility; this status CANNOT be overridden by a score
-pending            Assessment job is running
-failed             Assessment job failed; see error field
+supported          No blocking rule; all required facts and evidence meet threshold
+conditional        Hard gates pass but one or more critical facts or lab tests missing or pending verification
+unsupported        Hard incompatibility detected; CANNOT be overridden by ranking or confidence score
 ```
 
-> The frontend MUST display `unsupported` assessments with a blocking indicator.
+**InvestigationExecutionStatus enum (Asynchronous / Job Execution Lifecycle):**
+```
+pending            Investigation job is currently in progress or awaiting worker pickup
+completed          Investigation run completed successfully; assessments are finalized
+failed             Investigation run failed unexpectedly; see error_message
+```
+
+> The frontend MUST display `unsupported` assessments with an explicit blocking indicator and list the failing gates.
 > A route with status `unsupported` MUST NOT advance to RFQ preparation.
+> Execution states (`pending`, `completed`, `failed`) track job processing, not qualification outcomes.
 
 **HardGateResult shape:**
 ```
@@ -218,6 +224,7 @@ outcome            "pass" | "fail" | "unknown"
 material_value     any                  Observed value used in the check
 required_value     any                  Processor requirement
 evidence_ref_id    string (UUID)        Optional link to supporting evidence
+blocking           boolean              True if gate failure blocks route
 ```
 
 **MissingFact shape:**
@@ -225,37 +232,45 @@ evidence_ref_id    string (UUID)        Optional link to supporting evidence
 fact_id            string
 description        string               What is needed and why
 acquisition_method string               "lab_test" | "document" | "user_confirmation" | "external_source"
+is_critical        boolean              True if required for supported status
 ```
 
 ### 3.3 EvidenceRecord
 
 ```
 evidence_id        string (UUID)
-claim_text         string
-source_url         string
-source_title       string
+lot_id             string (UUID)        Optional link to material lot
+claim_subject      string               Property or condition claim (e.g. "moisture_level")
+claim_text         string               Verbatim claim statement
+source_url         string               Origin URL or document URI
+source_title       string               Document title or publisher
+source_type        string               "lab_report" | "supplier_spec" | "receiver_portal" | "sds"
 retrieved_at       string (ISO datetime)
-extraction_method  string               "tinyfish_fetch" | "user_upload" | "erp_import" | "manual_entry"
-evidence_status    EvidenceStatus       See enum below
-claim_subject      string               What the claim is about
-supporting_passage string               Optional excerpt from source
-verified_by        string               Optional user ID or system identifier
+extraction_method  ExtractionMethod     "lab_test" | "user_upload" | "erp_import" | "tinyfish_fetch" | "manual_entry" | "llm_extract"
+provenance         EvidenceProvenance   See enum below
+verification_state VerificationState    "unverified" | "verified" | "contradicted" | "stale"
+supporting_passage string               Optional excerpt from primary source
+content_hash       string               Cryptographic hash (e.g. SHA-256) of raw content
+document_ref       string               Storage reference for PDF/lab scan
+verified_by        string               User ID or auditor identifier
 contradicted_by    string[]             IDs of contradicting evidence records
 ```
 
-**EvidenceStatus enum (canonical provenance labels):**
+**EvidenceProvenance enum (Canonical Provenance Labels):**
 ```
-verified              Independently confirmed through a defined verification process
-source_supported      Supported by an identified external source; not independently confirmed
-user_supplied         Entered or asserted by an authorized user
-inferred              Derived from available information; not directly observed
-estimated             Calculated or approximated; not measured
-synthetic_demo        Generated for testing or demonstration; MUST be labeled as such in UI
-stale                 Source freshness policy exceeded; requires recheck
+publicly_stated          Stated publicly on receiver website or brochure (does not prove lot acceptance)
+user_reported            Reported by material generator or facility team
+inferred                 Derived logically from correlated facts; not directly measured
+estimated                Calculated approximation based on industry factors
+independently_verified   Audited or confirmed by certified third-party lab / testing body
+outcome_confirmed        Confirmed post-processing by receiving facility intake assay
+synthetic_demo           Synthetic test fixture; MUST be visually watermarked in UI
+stale                    Exceeded validity window; requires re-verification
 ```
 
-> The frontend MUST display the evidence status label alongside any claim.
-> `synthetic_demo` content MUST be visually distinct and never presented as real data.
+> The frontend MUST display the provenance and verification state alongside any claim.
+> Publicly stated receiver capabilities DO NOT prove acceptance of a specific lot or current capacity.
+> `synthetic_demo` content MUST be visually distinct and never presented as live industrial data.
 
 ### 3.4 ExchangeListing
 
@@ -411,10 +426,12 @@ Endpoints marked **IMPLEMENTED & TESTED** are active in `apps/api` and covered b
 | POST | /api/v1/materials/lots | Create a material lot (tenant-scoped) | Aarushi | IMPLEMENTED & TESTED |
 | GET | /api/v1/materials/lots/{lot_id} | Retrieve single lot (tenant-scoped) | Aarushi | IMPLEMENTED & TESTED |
 | GET | /api/v1/materials/lots | List lots with pagination & filtering | Aarushi | IMPLEMENTED & TESTED |
+| POST | /api/v1/evidence | Register audit-grade evidence record | Aarushi | IMPLEMENTED & TESTED |
+| GET | /api/v1/lots/{lot_id}/evidence | List evidence claims for a lot | Aarushi | IMPLEMENTED & TESTED |
+| POST | /api/v1/investigations | Launch deterministic qualification run | Aarushi | IMPLEMENTED & TESTED |
+| GET | /api/v1/investigations/{investigation_id} | Retrieve investigation & route assessments | Aarushi | IMPLEMENTED & TESTED |
+| GET | /api/v1/lots/{lot_id}/routes | Retrieve candidate route assessments | Aarushi | IMPLEMENTED & TESTED |
 | POST | /api/v1/facilities/{facility_id}/waste-imports | Import CSV waste records | Aarushi | MISSING |
-| POST | /api/v1/investigations | Start a qualification/discovery job | Aarushi | MISSING |
-| GET | /api/v1/investigations/{investigation_id} | Poll job status and partial results | Aarushi | MISSING |
-| GET | /api/v1/lots/{lot_id}/routes | Retrieve qualification assessments | Aarushi | MISSING |
 | POST | /api/v1/verification-actions | Record an action or test result | Aarushi | MISSING |
 | POST | /api/v1/exchange/listings | Create an exchange listing | Hitendra | MISSING |
 | GET | /api/v1/exchange/listings | Search listings (buyer view) | Hitendra | MISSING |
@@ -577,6 +594,127 @@ Authorization: Bearer <token> (or X-Org-Id, X-User-Id, X-Role in mock mode)
   }
 }
 ```
+
+#### `POST /api/v1/evidence`
+**Request:**
+```json
+{
+  "lot_id": "893c5240-8b1b-417f-b883-99fa41098bca",
+  "claim_subject": "moisture_level",
+  "claim_text": "Moisture assay shows 0.02% water content.",
+  "source_url": "https://lab.testing.org/cert/CERT-1092",
+  "source_title": "Certified ASTM Moisture Assay",
+  "source_type": "lab_report",
+  "extraction_method": "lab_test",
+  "provenance": "independently_verified",
+  "verification_state": "verified",
+  "supporting_passage": "Karl Fischer titration confirmed moisture at 0.02% by weight.",
+  "content_hash": "sha256-112233445566778899aabbccddeeff00",
+  "document_ref": "DOC-LAB-1092.pdf",
+  "verified_by": "Dr. E. Vance, Lead Chemist"
+}
+```
+**Response (201 Created):**
+```json
+{
+  "data": {
+    "evidence_id": "a4c3d5e6-f7a8-4b9c-0d1e-2f3a4b5c6d7e",
+    "lot_id": "893c5240-8b1b-417f-b883-99fa41098bca",
+    "claim_subject": "moisture_level",
+    "claim_text": "Moisture assay shows 0.02% water content.",
+    "source_url": "https://lab.testing.org/cert/CERT-1092",
+    "source_title": "Certified ASTM Moisture Assay",
+    "source_type": "lab_report",
+    "retrieved_at": "2026-10-23T11:00:00Z",
+    "extraction_method": "lab_test",
+    "provenance": "independently_verified",
+    "verification_state": "verified",
+    "supporting_passage": "Karl Fischer titration confirmed moisture at 0.02% by weight.",
+    "content_hash": "sha256-112233445566778899aabbccddeeff00",
+    "document_ref": "DOC-LAB-1092.pdf",
+    "verified_by": "Dr. E. Vance, Lead Chemist",
+    "contradicted_by": []
+  },
+  "meta": {
+    "request_id": "uuid",
+    "timestamp": "2026-10-23T11:00:00Z"
+  }
+}
+```
+
+#### `POST /api/v1/investigations`
+**Request:**
+```json
+{
+  "lot_id": "893c5240-8b1b-417f-b883-99fa41098bca",
+  "candidate_route_ids": ["route-secondary-aluminum-smelter"],
+  "notes": "Qualify high-purity 6061 aluminum scrap for secondary smelting"
+}
+```
+**Response (201 Created):**
+```json
+{
+  "data": {
+    "investigation_id": "d8e9f0a1-b2c3-4d5e-6f7a-8b9c0d1e2f3a",
+    "org_id": "11111111-1111-1111-1111-111111111111",
+    "lot_id": "893c5240-8b1b-417f-b883-99fa41098bca",
+    "status": "completed",
+    "assessments": [
+      {
+        "assessment_id": "uuid",
+        "lot_id": "893c5240-8b1b-417f-b883-99fa41098bca",
+        "candidate_route_id": "route-secondary-aluminum-smelter",
+        "status": "supported",
+        "hard_gate_results": [
+          {
+            "gate_id": "gate-hazardous-exclusion",
+            "gate_name": "Hazardous Waste Exclusion",
+            "outcome": "pass",
+            "material_value": false,
+            "required_value": false,
+            "blocking": false
+          },
+          {
+            "gate_id": "gate-oil-contamination",
+            "gate_name": "Max Machining Oil Contamination",
+            "outcome": "pass",
+            "material_value": 0.2,
+            "required_value": 1.5,
+            "blocking": false
+          }
+        ],
+        "blocking_conditions": [],
+        "missing_facts": [],
+        "rationale": "All hard constraints satisfied...",
+        "next_action": "Proceed to exchange listing preparation.",
+        "evidence_refs": ["a4c3d5e6-f7a8-4b9c-0d1e-2f3a4b5c6d7e"],
+        "rule_version": "1.0.0",
+        "assessed_at": "2026-10-23T11:01:00Z"
+      }
+    ],
+    "error_message": null,
+    "created_at": "2026-10-23T11:01:00Z",
+    "completed_at": "2026-10-23T11:01:00Z"
+  },
+  "meta": {
+    "request_id": "uuid",
+    "timestamp": "2026-10-23T11:01:00Z"
+  }
+}
+```
+
+> **Execution status vs qualification outcome**: The top-level `status` field (`completed`) tracks
+> the job lifecycle. Each assessment's `status` field (`supported`/`conditional`/`unsupported`) is
+> the authoritative qualification decision and cannot be altered by ranking or scoring.
+
+#### `GET /api/v1/investigations/{investigation_id}`
+**Response (200 OK):** returns `InvestigationRead` inside `ResponseEnvelope` (same shape as creation response).
+
+#### `GET /api/v1/lots/{lot_id}/routes`
+**Response (200 OK):** returns `List[QualificationAssessmentRead]` inside `ResponseEnvelope`.
+
+#### `GET /api/v1/lots/{lot_id}/evidence`
+**Response (200 OK):** returns `List[EvidenceRecordRead]` inside `ResponseEnvelope`.
 
 ---
 

@@ -29,6 +29,9 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 @pytest.fixture(scope="session", autouse=True)
 def setup_database():
     """Create all database schema tables once per test session."""
+    import strata.domain.materials.models  # noqa: F401
+    import strata.domain.qualification.models  # noqa: F401
+
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
