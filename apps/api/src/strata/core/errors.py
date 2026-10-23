@@ -85,6 +85,9 @@ class ConflictError(StrataError):
         )
 
 
+DuplicateEventError = ConflictError
+
+
 class QualificationHardBlockError(StrataError):
     """Raised when a marketplace action violates a hard qualification constraint."""
 
