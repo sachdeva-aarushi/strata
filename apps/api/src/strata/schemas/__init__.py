@@ -26,6 +26,7 @@ from strata.schemas.marketplace import (
     RFQStatus,
 )
 from strata.schemas.materials import (
+    EvidenceAttachRequest,
     MaterialLotCreate,
     MaterialLotFilter,
     MaterialLotRead,
@@ -70,6 +71,7 @@ __all__ = [
     "EvidenceRecordRead",
     "MaterialLotStatus",
     "MaterialTypeInfo",
+    "EvidenceAttachRequest",
     "MaterialLotCreate",
     "MaterialLotUpdate",
     "MaterialLotRead",
