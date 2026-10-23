@@ -1,6 +1,7 @@
 import {
   BuyerRequirement,
   BuyerRequirementMatchesResponse,
+  EvidenceRecord,
   ExchangeListing,
   Investigation,
   MaterialLot,
@@ -144,6 +145,29 @@ export const api = {
       request<ResponseEnvelope<MaterialLot>>(`/materials/lots/${lot_id}`, {
         method: 'PATCH',
         body: JSON.stringify(data),
+      }),
+
+    getLotEvidence: (lot_id: string) =>
+      request<ResponseEnvelope<EvidenceRecord[]>>(`/materials/lots/${lot_id}/evidence`),
+
+    createLotEvidence: (
+      lot_id: string,
+      data: {
+        claim_type: string;
+        provenance: string;
+        data_payload: Record<string, any>;
+        verification_status?: string;
+      }
+    ) =>
+      request<ResponseEnvelope<EvidenceRecord>>(`/materials/lots/${lot_id}/evidence`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    attachEvidence: (lot_id: string, evidence_ids: string[]) =>
+      request<ResponseEnvelope<MaterialLot>>(`/materials/lots/${lot_id}/evidence/attach`, {
+        method: 'POST',
+        body: JSON.stringify({ evidence_ids }),
       }),
   },
 

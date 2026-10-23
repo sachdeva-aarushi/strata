@@ -17,6 +17,7 @@ import {
   X,
   ShoppingBag,
   Sparkles,
+  ShoppingCart,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
@@ -55,6 +56,28 @@ export function Sidebar({
       icon: <LayoutDashboard size={18} />,
       description: 'Mass-balance telemetry & cluster health',
     },
+    ...(currentRole === 'buyer' || currentRole === 'admin'
+      ? [
+          {
+            label: 'Buyer Dashboard',
+            href: '/buyer',
+            icon: <ShoppingCart size={18} />,
+            badge: 'Buyer',
+            description: 'Feedstock sourcing & requirement tracking',
+          },
+        ]
+      : []),
+    ...(currentRole === 'seller' || currentRole === 'facility_operator' || currentRole === 'admin'
+      ? [
+          {
+            label: 'Seller Dashboard',
+            href: '/seller',
+            icon: <Factory size={18} />,
+            badge: 'Seller',
+            description: 'Byproduct inventory & listing pipeline',
+          },
+        ]
+      : []),
     {
       label: 'Materials',
       href: '/materials',

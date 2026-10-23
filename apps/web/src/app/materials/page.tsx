@@ -16,6 +16,7 @@ import {
   ExternalLink,
   ChevronRight,
   Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
 import { Badge } from '@/components/Badge';
@@ -545,11 +546,20 @@ function MaterialsContent() {
               {/* Action buttons */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
                 <Link
-                  href={`/proofpath?lot_id=${selectedLot.lot_id}`}
+                  href={`/materials/${selectedLot.lot_id}`}
                   className="clay-btn clay-btn-primary"
                   style={{ width: '100%', fontSize: '0.8125rem' }}
                 >
-                  <ShieldCheck size={16} />
+                  <ExternalLink size={15} />
+                  <span>View Full Material Dossier</span>
+                </Link>
+
+                <Link
+                  href={`/proofpath?lot_id=${selectedLot.lot_id}`}
+                  className="clay-btn clay-btn-secondary"
+                  style={{ width: '100%', fontSize: '0.8125rem' }}
+                >
+                  <ShieldCheck size={15} />
                   <span>Run Qualification Assessment</span>
                 </Link>
 
@@ -558,6 +568,7 @@ function MaterialsContent() {
                   className="clay-btn clay-btn-secondary"
                   style={{ width: '100%', fontSize: '0.8125rem' }}
                 >
+                  <RefreshCw size={15} />
                   <span>Publish to Circular Exchange</span>
                 </Link>
               </div>
