@@ -18,6 +18,7 @@ from strata.db.base import Base
 # Import all domain models to ensure they are registered on Base.metadata
 import strata.domain.materials.models  # noqa: F401
 import strata.domain.qualification.models  # noqa: F401
+import strata.domain.marketplace.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
