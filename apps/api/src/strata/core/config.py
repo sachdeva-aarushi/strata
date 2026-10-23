@@ -112,5 +112,12 @@ class Settings(BaseSettings):
     # Testing / Mock Settings
     MOCK_AUTH_ENABLED: bool = True
 
+    # ProofPath qualification service (owned by the qualification team)
+    PROOFPATH_BASE_URL: str = "http://localhost:8001"
+    PROOFPATH_TIMEOUT_SECONDS: float = 5.0
+    # When True, ProofPath outages/timeouts/bad payloads return a clearly marked mock result
+    # instead of an error. Intended for offline development and tests only.
+    PROOFPATH_MOCK_FALLBACK: bool = False
+
 
 settings = Settings()

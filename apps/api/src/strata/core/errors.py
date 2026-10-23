@@ -97,6 +97,18 @@ class QualificationHardBlockError(StrataError):
         )
 
 
+class InvalidStateTransitionError(StrataError):
+    """Raised when an entity transition violates the state machine rules."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(
+            message=message,
+            code="INVALID_STATE_TRANSITION",
+            status_code=422,
+            details=details,
+        )
+
+
 def make_error_envelope(code: str, message: str, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return {
         "error": {

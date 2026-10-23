@@ -15,6 +15,8 @@ class QualificationOutcome(str, Enum):
     SUPPORTED = "supported"
     CONDITIONAL = "conditional"
     UNSUPPORTED = "unsupported"
+    PENDING = "pending"
+    FAILED = "failed"
 
 
 class InvestigationExecutionStatus(str, Enum):
