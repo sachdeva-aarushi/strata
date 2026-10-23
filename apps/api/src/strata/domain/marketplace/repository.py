@@ -16,7 +16,7 @@ from strata.domain.marketplace.schemas import (
     OfferStatus,
     RFQStatus,
 )
-from strata.domain.materials.models import MaterialLot
+from strata.domain.materials.models import Facility, MaterialLot
 
 
 class MarketplaceRepository:
@@ -97,11 +97,36 @@ class MarketplaceRepository:
         self.db.refresh(requirement)
         return requirement
 
-    def get_requirement(self, requirement_id: str, org_id: str) -> Optional[BuyerRequirement]:
-        stmt = select(BuyerRequirement).where(
-            BuyerRequirement.id == requirement_id,
-            BuyerRequirement.organization_id == org_id,
+    def get_requirement(self, requirement_id: str, org_id: Optional[str] = None) -> Optional[BuyerRequirement]:
+        stmt = select(BuyerRequirement).where(BuyerRequirement.id == requirement_id)
+        if org_id is not None:
+            stmt = stmt.where(BuyerRequirement.organization_id == org_id)
+        return self.db.execute(stmt).scalar_one_or_none()
+
+    def list_all_requirements(self) -> List[BuyerRequirement]:
+        stmt = select(BuyerRequirement).order_by(BuyerRequirement.created_at.desc())
+        return list(self.db.execute(stmt).scalars().all())
+
+    def get_cluster_listings(self, cluster_id: str) -> List[Tuple[Listing, MaterialLot, Facility]]:
+        """Active listings and their material lots scoped to a cluster."""
+        stmt = (
+            select(Listing, MaterialLot, Facility)
+            .join(MaterialLot, MaterialLot.lot_id == Listing.material_lot_id)
+            .join(Facility, Facility.facility_id == Listing.facility_id)
+            .where(
+                Listing.status == ListingStatus.ACTIVE,
+                Listing.visibility.in_([ListingVisibility.PUBLIC, ListingVisibility.CLUSTER_ONLY]),
+                or_(
+                    Facility.cluster_id == cluster_id,
+                    Facility.cluster_id.is_(None),
+                ),
+            )
+            .order_by(Listing.created_at.asc())
         )
+        return list(self.db.execute(stmt).all())
+
+    def get_facility(self, facility_id: str) -> Optional[Facility]:
+        stmt = select(Facility).where(Facility.facility_id == facility_id)
         return self.db.execute(stmt).scalar_one_or_none()
 
     # -- RFQs ---------------------------------------------------------------

@@ -382,3 +382,81 @@ class WorkflowEventRead(BaseModel):
             if "metadata" not in data and "metadata_payload" in data:
                 data["metadata"] = data["metadata_payload"]
         return data
+
+
+# ---------------------------------------------------------------------------
+# Cluster Synergy and Batch Aggregation
+# ---------------------------------------------------------------------------
+
+class LotContribution(BaseModel):
+    """A constituent material lot proposed as part of an aggregated batch."""
+    lot_id: str
+    listing_id: Optional[str] = None
+    organization_id: str
+    facility_id: str
+    quantity: float
+    unit: str
+    material_type: str
+    material_category: str
+    declared_attributes: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AggregationProposal(BaseModel):
+    """A proposed combination of compatible lots meeting buyer volume thresholds."""
+    proposal_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    requirement_id: str
+    cluster_id: str
+    lots: List[LotContribution]
+    total_quantity: float
+    unit: str
+    target_min_quantity: float
+    composite_attributes: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Weighted averages of composition, moisture, purity, etc.",
+    )
+    quality_variance_warnings: List[str] = Field(
+        default_factory=list,
+        description="Flags when individual lot attributes deviate significantly from the mean",
+    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LogisticsEstimateRequest(BaseModel):
+    """Payload to calculate indicative multi-stop transport metrics."""
+    lot_ids: List[str] = Field(..., min_length=1, description="List of lot UUIDs to collect")
+    destination_facility_id: str = Field(..., description="Destination processing facility UUID")
+    rate_per_km_tonne: float = Field(default=12.5, gt=0, description="Transport tariff in INR per tonne-km")
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+
+class LogisticsEstimate(BaseModel):
+    """Indicative transport routing, cost and emissions estimates."""
+    lot_ids: List[str]
+    destination_facility_id: str
+    total_tonnage: float
+    total_distance_km: float
+    rate_per_km_tonne: float
+    estimated_transport_cost_inr: float
+    estimated_transport_emissions_kg_co2e: float
+    currency: str = "INR"
+    methodology: str = "indicative_milk_run_v1"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ClusterSummary(BaseModel):
+    """Aggregated cluster circularity indicators."""
+    cluster_id: str
+    active_listings_count: int
+    total_available_tonnage: float
+    tonnage_by_category: Dict[str, float] = Field(default_factory=dict)
+    potential_aggregation_opportunities: int
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = ConfigDict(from_attributes=True)
