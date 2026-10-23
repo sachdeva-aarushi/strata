@@ -73,6 +73,9 @@ class BuyerRequirement(Base, TimestampMixin):
         default=ListingVisibility.PRIVATE,
         nullable=False,
     )
+    location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    delivery_requirements: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    constraints: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
 class RFQModel(Base, TimestampMixin):
@@ -98,6 +101,8 @@ class RFQModel(Base, TimestampMixin):
     )
     notes: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class OfferModel(Base, TimestampMixin):
@@ -122,6 +127,8 @@ class OfferModel(Base, TimestampMixin):
     terms: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     valid_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class WorkflowEventModel(Base):

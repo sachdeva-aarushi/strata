@@ -10,19 +10,30 @@ from strata.domain.marketplace.qualification import ProofPathQualificationClient
 from strata.domain.marketplace.schemas import (
     AggregationProposal,
     BuyerRequirementCreate,
+    BuyerRequirementMatchesResponse,
     BuyerRequirementRead,
+    BuyerRequirementUpdate,
+    CityIndicatorsResponse,
+    ClusterIndicatorsResponse,
     ClusterSummary,
+    FreightOption,
     ListingCreate,
     ListingRead,
     ListingStatusUpdateRequest,
+    ListingUpdate,
+    ListingVisibility,
+    LogisticsComparisonRequest,
+    LogisticsComparisonResponse,
     LogisticsEstimate,
     LogisticsEstimateRequest,
+    MatchCandidateRead,
     OfferCreate,
     OfferRead,
     QualificationResult,
     RFQCreate,
     RFQRead,
     StateTransitionRequest,
+    WorkflowEventCreate,
     WorkflowEventRead,
 )
 from strata.domain.marketplace.service import MarketplaceService
@@ -54,14 +65,34 @@ def create_listing(
 
 @router.get("/listings", response_model=PaginatedResponseEnvelope[ListingRead])
 def list_listings(
+    view: str = Query("own", description="'own' to list own listings, 'exchange' or 'all' to search discoverable active listings"),
+    category: Optional[str] = Query(None, description="Filter by material category"),
+    material_type: Optional[str] = Query(None, description="Filter by material type"),
+    unit: Optional[str] = Query(None, description="Filter by unit"),
+    min_quantity: Optional[float] = Query(None, description="Minimum available quantity"),
+    max_price: Optional[float] = Query(None, description="Maximum asking price per unit"),
+    visibility: Optional[ListingVisibility] = Query(None, description="Visibility filter"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: AuthUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedResponseEnvelope[ListingRead]:
-    """Lists the caller's organization's own listings."""
+    """Lists listings (own organization's listings or circular exchange search)."""
     service = MarketplaceService(db)
-    items, total = service.list_listings(org_id=current_user.org_id, page=page, page_size=page_size)
+    if view in ("exchange", "all"):
+        items, total = service.search_exchange_listings(
+            actor=current_user,
+            category=category,
+            material_type=material_type,
+            unit=unit,
+            min_quantity=min_quantity,
+            max_price=max_price,
+            visibility=visibility,
+            page=page,
+            page_size=page_size,
+        )
+    else:
+        items, total = service.list_listings(org_id=current_user.org_id, page=page, page_size=page_size)
     return PaginatedResponseEnvelope(
         data=items,
         pagination=PaginationInfo(
@@ -86,6 +117,32 @@ def get_listing(
     return ResponseEnvelope(data=listing, meta=MetaInfo())
 
 
+@router.patch("/listings/{listing_id}", response_model=ResponseEnvelope[ListingRead])
+@router.put("/listings/{listing_id}", response_model=ResponseEnvelope[ListingRead])
+def update_listing(
+    listing_id: str,
+    payload: ListingUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[ListingRead]:
+    """Updates listing commercial terms, availability, visibility, or status."""
+    service = MarketplaceService(db)
+    updated = service.update_listing(listing_id=listing_id, payload=payload, actor=current_user)
+    return ResponseEnvelope(data=updated, meta=MetaInfo())
+
+
+@router.get("/listings/{listing_id}/history", response_model=ResponseEnvelope[List[WorkflowEventRead]])
+def get_listing_workflow_history(
+    listing_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[List[WorkflowEventRead]]:
+    """Returns the chronological audit event timeline for a listing."""
+    service = MarketplaceService(db)
+    events = service.get_workflow_history(entity_id=listing_id, actor=current_user)
+    return ResponseEnvelope(data=events, meta=MetaInfo())
+
+
 @router.post(
     "/buyer-requirements",
     response_model=ResponseEnvelope[BuyerRequirementRead],
@@ -102,6 +159,28 @@ def create_buyer_requirement(
     return ResponseEnvelope(data=created, meta=MetaInfo())
 
 
+@router.get("/buyer-requirements", response_model=PaginatedResponseEnvelope[BuyerRequirementRead])
+def list_buyer_requirements(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PaginatedResponseEnvelope[BuyerRequirementRead]:
+    """Lists the caller's organization's buyer requirements."""
+    service = MarketplaceService(db)
+    items, total = service.list_requirements(org_id=current_user.org_id, page=page, page_size=page_size)
+    return PaginatedResponseEnvelope(
+        data=items,
+        pagination=PaginationInfo(
+            total=total,
+            page=page,
+            page_size=page_size,
+            has_next=(page * page_size) < total,
+        ),
+        meta=MetaInfo(),
+    )
+
+
 @router.get(
     "/buyer-requirements/{requirement_id}",
     response_model=ResponseEnvelope[BuyerRequirementRead],
@@ -115,6 +194,51 @@ def get_buyer_requirement(
     service = MarketplaceService(db)
     requirement = service.get_requirement(requirement_id=requirement_id, org_id=current_user.org_id)
     return ResponseEnvelope(data=requirement, meta=MetaInfo())
+
+
+@router.patch("/buyer-requirements/{requirement_id}", response_model=ResponseEnvelope[BuyerRequirementRead])
+@router.put("/buyer-requirements/{requirement_id}", response_model=ResponseEnvelope[BuyerRequirementRead])
+def update_buyer_requirement(
+    requirement_id: str,
+    payload: BuyerRequirementUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[BuyerRequirementRead]:
+    """Updates a buyer requirement."""
+    service = MarketplaceService(db)
+    updated = service.update_requirement(requirement_id=requirement_id, payload=payload, actor=current_user)
+    return ResponseEnvelope(data=updated, meta=MetaInfo())
+
+
+@router.delete("/buyer-requirements/{requirement_id}", response_model=ResponseEnvelope[dict])
+def delete_buyer_requirement(
+    requirement_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[dict]:
+    """Deletes a buyer requirement."""
+    service = MarketplaceService(db)
+    service.delete_requirement(requirement_id=requirement_id, actor=current_user)
+    return ResponseEnvelope(data={"deleted": True, "id": requirement_id}, meta=MetaInfo())
+
+
+@router.get(
+    "/buyer-requirements/{requirement_id}/matches",
+    response_model=ResponseEnvelope[BuyerRequirementMatchesResponse],
+)
+@router.post(
+    "/buyer-requirements/{requirement_id}/matches",
+    response_model=ResponseEnvelope[BuyerRequirementMatchesResponse],
+)
+def match_requirement_candidates(
+    requirement_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[BuyerRequirementMatchesResponse]:
+    """Matches listings against a buyer requirement with authoritative ProofPath qualification and logistics estimates."""
+    service = MarketplaceService(db)
+    result = service.match_candidates_with_qualification(requirement_id=requirement_id, org_id=current_user.org_id)
+    return ResponseEnvelope(data=result, meta=MetaInfo())
 
 
 @router.get(
@@ -395,7 +519,7 @@ def reject_offer(
 
 
 # ---------------------------------------------------------------------------
-# Cluster Synergy and Batch Aggregation
+# Cluster Synergy and Batch Aggregation (Hitendra)
 # ---------------------------------------------------------------------------
 
 @router.get(
@@ -454,7 +578,7 @@ def calculate_cluster_logistics(
     "/cluster/{cluster_id}/indicators",
     response_model=ResponseEnvelope[ClusterSummary],
 )
-def get_cluster_indicators(
+def get_cluster_synergy_indicators(
     cluster_id: str,
     current_user: AuthUser = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -463,3 +587,179 @@ def get_cluster_indicators(
     engine = ClusterSynergyEngine(db)
     summary = engine.get_cluster_indicators(cluster_id=cluster_id)
     return ResponseEnvelope(data=summary, meta=MetaInfo())
+
+
+# ---------------------------------------------------------------------------
+# Offer Review / Withdraw (Aarushi - Circular Exchange)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/offers/{offer_id}/review",
+    response_model=ResponseEnvelope[OfferRead],
+)
+def review_offer(
+    offer_id: str,
+    payload: Optional[StateTransitionRequest] = None,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[OfferRead]:
+    """Buyer marks an offer as under review."""
+    service = MarketplaceService(db)
+    reviewed = service.review_offer(
+        offer_id=offer_id,
+        actor=current_user,
+        notes=payload.notes if payload else None,
+    )
+    return ResponseEnvelope(data=reviewed, meta=MetaInfo())
+
+
+@router.post(
+    "/offers/{offer_id}/withdraw",
+    response_model=ResponseEnvelope[OfferRead],
+)
+def withdraw_offer(
+    offer_id: str,
+    payload: Optional[StateTransitionRequest] = None,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[OfferRead]:
+    """Seller withdraws their commercial offer."""
+    service = MarketplaceService(db)
+    withdrawn = service.withdraw_offer(
+        offer_id=offer_id,
+        actor=current_user,
+        notes=payload.notes if payload else None,
+    )
+    return ResponseEnvelope(data=withdrawn, meta=MetaInfo())
+
+
+# ---------------------------------------------------------------------------
+# Workflow Events API (Aarushi - Circular Exchange)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/events",
+    response_model=ResponseEnvelope[WorkflowEventRead],
+    status_code=status.HTTP_201_CREATED,
+)
+def record_workflow_event(
+    payload: WorkflowEventCreate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[WorkflowEventRead]:
+    """Records an auditable workflow event."""
+    service = MarketplaceService(db)
+    event = service.record_custom_event(payload=payload, actor=current_user)
+    return ResponseEnvelope(data=event, meta=MetaInfo())
+
+
+@router.get(
+    "/events",
+    response_model=PaginatedResponseEnvelope[WorkflowEventRead],
+)
+def list_workflow_events(
+    entity_type: Optional[str] = Query(None, description="Filter by entity type (listing, rfq, offer, requirement)"),
+    entity_id: Optional[str] = Query(None, description="Filter by entity ID"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PaginatedResponseEnvelope[WorkflowEventRead]:
+    """Lists auditable workflow events for the organization."""
+    service = MarketplaceService(db)
+    items, total = service.list_workflow_events(
+        actor=current_user,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        page=page,
+        page_size=page_size,
+    )
+    return PaginatedResponseEnvelope(
+        data=items,
+        pagination=PaginationInfo(
+            total=total,
+            page=page,
+            page_size=page_size,
+            has_next=(page * page_size) < total,
+        ),
+        meta=MetaInfo(),
+    )
+
+
+@router.get(
+    "/events/{entity_id}",
+    response_model=ResponseEnvelope[List[WorkflowEventRead]],
+)
+def get_entity_workflow_history(
+    entity_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[List[WorkflowEventRead]]:
+    """Retrieves the full workflow history for any entity (listing, rfq, etc.)."""
+    service = MarketplaceService(db)
+    events = service.get_workflow_history(entity_id=entity_id, actor=current_user)
+    return ResponseEnvelope(data=events, meta=MetaInfo())
+
+
+# ---------------------------------------------------------------------------
+# Logistics Comparison and Exchange Indicators (Aarushi - Circular Exchange)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/logistics/compare",
+    response_model=ResponseEnvelope[LogisticsComparisonResponse],
+)
+@router.get(
+    "/logistics/compare",
+    response_model=ResponseEnvelope[LogisticsComparisonResponse],
+)
+def compare_logistics(
+    origin_facility_id: Optional[str] = Query(None),
+    destination_facility_id: Optional[str] = Query(None),
+    origin_location: Optional[str] = Query(None),
+    destination_location: Optional[str] = Query(None),
+    quantity: float = Query(1000.0, gt=0),
+    unit: str = Query("kg"),
+    material_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[LogisticsComparisonResponse]:
+    """Compares freight transport options across diesel, electric, and rail."""
+    service = MarketplaceService(db)
+    req = LogisticsComparisonRequest(
+        origin_facility_id=origin_facility_id,
+        destination_facility_id=destination_facility_id,
+        origin_location=origin_location,
+        destination_location=destination_location,
+        quantity=quantity,
+        unit=unit,
+        material_type=material_type,
+    )
+    result = service.compare_logistics(req)
+    return ResponseEnvelope(data=result, meta=MetaInfo())
+
+
+@router.get(
+    "/cluster/indicators",
+    response_model=ResponseEnvelope[ClusterIndicatorsResponse],
+)
+def get_cluster_indicators(
+    cluster_id: Optional[str] = Query(None, description="Cluster UUID"),
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[ClusterIndicatorsResponse]:
+    """Exposes cluster-level circular exchange indicators aggregated from persisted records."""
+    service = MarketplaceService(db)
+    indicators = service.get_cluster_indicators(cluster_id=cluster_id)
+    return ResponseEnvelope(data=indicators, meta=MetaInfo())
+
+
+@router.get(
+    "/city/indicators",
+    response_model=ResponseEnvelope[CityIndicatorsResponse],
+)
+def get_city_indicators(
+    db: Session = Depends(get_db),
+) -> ResponseEnvelope[CityIndicatorsResponse]:
+    """Exposes city-level material prevention and diversion indicators."""
+    service = MarketplaceService(db)
+    indicators = service.get_city_indicators()
+    return ResponseEnvelope(data=indicators, meta=MetaInfo())
