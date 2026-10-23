@@ -198,10 +198,11 @@ def insert_idempotent(conn, table: Table, row: dict, pk_col_name: str) -> bool:
     pk_val = row[pk_col_name]
     check_stmt = select(table.c[pk_col_name]).where(table.c[pk_col_name] == pk_val)
     existing = conn.execute(check_stmt).scalar()
-    if existing is not None:
-        return False  # Record already exists
-
     filtered_row = {k: v for k, v in row.items() if k in table.c}
+    if existing is not None:
+        conn.execute(table.update().where(table.c[pk_col_name] == pk_val).values(**filtered_row))
+        return False  # Record already existed, updated with current fields
+
     conn.execute(table.insert().values(**filtered_row))
     return True
 
