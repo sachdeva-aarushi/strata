@@ -26,8 +26,8 @@
 |------|--------|-------|
 | Root layout (apps/ services/ packages/ integrations/ data/ infra/ docs/ scripts/) | VERIFIED | All top-level directories present |
 | README.md | VERIFIED | Comprehensive design document (1185 lines) |
-| .gitignore | VERIFIED | 92 bytes, present |
-| .env.example | SCAFFOLD | File exists, content is empty |
+| .gitignore | VERIFIED | Excludes .env, secrets, *.db, and virtual environments |
+| .env.example | VERIFIED | Comprehensive template with Supabase, PostgreSQL, and development defaults |
 | .github/PULL_REQUEST_TEMPLATE.md | VERIFIED | Present |
 | .github/ISSUE_TEMPLATE/ | VERIFIED | Directory present |
 | .github/workflows/ | SCAFFOLD | Directory present; no CI workflows defined |
@@ -53,9 +53,9 @@
 
 | Area | Status | Notes |
 |------|--------|-------|
-| apps/api/pyproject.toml | VERIFIED | Full metadata, dependencies, and pytest configuration active |
-| apps/api/requirements.txt | VERIFIED | Populated with FastAPI, Pydantic, SQLAlchemy, pytest, and httpx |
-| apps/api/README.md | VERIFIED | Populated with run instructions and endpoint overview |
+| apps/api/pyproject.toml | VERIFIED | Full metadata, psycopg2-binary, alembic, dependencies, and pytest configuration active |
+| apps/api/requirements.txt | VERIFIED | Populated with FastAPI, Pydantic, SQLAlchemy, psycopg2-binary, Alembic, pytest, and httpx |
+| apps/api/README.md | VERIFIED | Populated with Supabase setup, migration commands, and architecture rules |
 
 ### 3.2 Application entry point
 
@@ -69,18 +69,19 @@
 | Area | Status | Notes |
 |------|--------|-------|
 | core/__init__.py | VERIFIED | Present |
-| core/config.py | TESTED | Pydantic BaseSettings loading from environment variables |
+| core/config.py | TESTED | Pydantic BaseSettings loading from env, postgres:// normalization, Supabase credentials |
 | core/auth.py | TESTED | Tenant-scoped auth dependency, JWT token decode, and role checks |
 | core/logging.py | TESTED | Structured JSON formatter and logging setup |
 | core/errors.py | TESTED | Domain exception hierarchy, standardized error envelopes, and exception handlers |
 
-### 3.4 Database
+### 3.4 Database & Persistence
 
 | Area | Status | Notes |
 |------|--------|-------|
 | db/base.py | TESTED | DeclarativeBase and TimestampMixin |
-| db/session.py | TESTED | Engine and SessionLocal session factory with get_db dependency |
-| Alembic migration configuration | PROPOSED | Planned next |
+| db/session.py | TESTED | Supabase PostgreSQL and SQLite engine, connection pooling, SSL enforcement, zero silent fallback |
+| Alembic migrations | TESTED | Initial revision `86db0305b294` covers organizations, facilities, material_lots, evidence_records, investigations, qualification_assessments |
+| alembic.ini | VERIFIED | Present at both repository root and `apps/api/` |
 
 ### 3.5 Domain modules
 

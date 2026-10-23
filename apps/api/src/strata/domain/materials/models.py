@@ -12,7 +12,7 @@ class Organization(Base, TimestampMixin):
     __tablename__ = "organizations"
 
     org_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
@@ -36,12 +36,12 @@ class Facility(Base, TimestampMixin):
     __tablename__ = "facilities"
 
     facility_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
     org_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         ForeignKey("organizations.org_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -59,18 +59,18 @@ class MaterialLot(Base, TimestampMixin):
     __tablename__ = "material_lots"
 
     lot_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
     org_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         ForeignKey("organizations.org_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     facility_id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         ForeignKey("facilities.facility_id", ondelete="CASCADE"),
         nullable=False,
         index=True,

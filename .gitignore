@@ -12,8 +12,15 @@ __pycache__/
 *.db
 *.sqlite3
 
-# Environment
+# Environment and Secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+
+# Virtual Environments
 .venv/
 env/
 venv/
