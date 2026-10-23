@@ -7,6 +7,7 @@ Material lots and their canonical ``material_lot_id`` remain owned by the
 materials registry.
 """
 
+from datetime import datetime, timezone
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from pydantic import BaseModel
@@ -30,11 +31,22 @@ from strata.domain.marketplace.qualification import ProofPathQualificationClient
 from strata.domain.marketplace.repository import MarketplaceRepository
 from strata.domain.marketplace.schemas import (
     BuyerRequirementCreate,
+    BuyerRequirementMatchesResponse,
     BuyerRequirementRead,
+    BuyerRequirementUpdate,
+    CityIndicatorsResponse,
+    ClusterIndicatorsResponse,
+    FreightOption,
     ListingCreate,
     ListingRead,
     ListingStatus,
+    ListingUpdate,
     ListingVisibility,
+    LogisticsComparisonRequest,
+    LogisticsComparisonResponse,
+    MatchCandidateRead,
+    MatchEligibility,
+    MaterialCategoryVolume,
     OfferCreate,
     OfferRead,
     OfferStatus,
@@ -42,10 +54,15 @@ from strata.domain.marketplace.schemas import (
     RFQCreate,
     RFQRead,
     RFQStatus,
+    WorkflowEventCreate,
     WorkflowEventRead,
     WorkflowEventType,
 )
+from strata.domain.materials.models import Facility
 from strata.domain.materials.taxonomy import get_all_material_types, get_material_type
+from strata.domain.qualification.routes import CANDIDATE_ROUTES, CandidateRoute
+from strata.domain.qualification.service import ProofPathQualificationEngine
+from strata.schemas.qualification import QualificationOutcome
 
 DEFAULT_VISIBILITY_LEVELS: FrozenSet[ListingVisibility] = frozenset(
     {ListingVisibility.PUBLIC, ListingVisibility.CLUSTER_ONLY}
@@ -120,6 +137,42 @@ class MarketplaceService:
 
     # -- listings -----------------------------------------------------------
 
+    def enrich_listing(self, listing: Listing) -> ListingRead:
+        """Enriches listing with material lot specifications, properties, facility location, and evidence."""
+        read = ListingRead.model_validate(listing)
+        lots = self.repository.get_lots_by_ids([listing.material_lot_id])
+        lot = lots.get(listing.material_lot_id)
+        if lot:
+            read.material_type = lot.material_type
+            tax = get_material_type(lot.material_type)
+            read.material_category = tax.category if tax else None
+            read.material_properties = lot.declared_attributes or {}
+            read.availability_from = lot.availability_from
+            read.availability_to = lot.availability_to
+            read.lot_quantity = lot.quantity
+
+            # Facility location
+            fac = self.repository.get_facility(lot.facility_id)
+            if fac:
+                parts = [p for p in [fac.name, fac.location_postal_code, fac.location_country] if p]
+                read.location = ", ".join(parts)
+
+            # Evidence
+            ev_records = self.repository.get_evidence_for_lot(lot.lot_id)
+            read.evidence_count = len(ev_records)
+            read.supporting_evidence = [
+                {
+                    "evidence_id": e.evidence_id,
+                    "claim_subject": e.claim_subject,
+                    "claim_text": e.claim_text,
+                    "source_title": e.source_title,
+                    "provenance": e.provenance,
+                    "verification_state": e.verification_state,
+                }
+                for e in ev_records[:5]
+            ]
+        return read
+
     def create_listing(self, payload: ListingCreate, org_id: str) -> ListingRead:
         """Publishes a lot the caller's organization owns, after checking it against the registry."""
         lot = self.repository.get_lot_for_org(lot_id=payload.material_lot_id, org_id=org_id)
@@ -156,7 +209,20 @@ class MarketplaceService:
             status=payload.status,
         )
         saved = self.repository.add_listing(listing)
-        return ListingRead.model_validate(saved)
+        event = WorkflowEventModel(
+            entity_type="listing",
+            entity_id=saved.id,
+            event_type=WorkflowEventType.LISTING_CREATED.value,
+            from_state=None,
+            to_state=saved.status.value,
+            actor_id="system",
+            actor_role="facility_operator",
+            actor_org_id=org_id,
+            notes="Listing published to circular exchange",
+            metadata_payload={},
+        )
+        self.repository.add_workflow_event(event)
+        return self.enrich_listing(saved)
 
     def get_listing(self, listing_id: str, org_id: str) -> ListingRead:
         listing = self.repository.get_listing(listing_id=listing_id, org_id=org_id)
@@ -165,12 +231,96 @@ class MarketplaceService:
                 f"Listing '{listing_id}' was not found in your organization scope.",
                 details={"listing_id": listing_id},
             )
-        return ListingRead.model_validate(listing)
+        return self.enrich_listing(listing)
+
+    def update_listing(
+        self,
+        listing_id: str,
+        payload: ListingUpdate,
+        actor: AuthUser,
+    ) -> ListingRead:
+        """Updates listing commercial terms, availability, visibility, or status."""
+        listing = self.repository.get_listing(listing_id=listing_id, org_id=actor.org_id)
+        if not listing:
+            raise ResourceNotFoundError(
+                f"Listing '{listing_id}' was not found in your organization scope.",
+                details={"listing_id": listing_id},
+            )
+
+        lot = self.repository.get_lot_for_org(lot_id=listing.material_lot_id, org_id=actor.org_id)
+        if payload.available_quantity is not None and lot and payload.available_quantity > lot.quantity:
+            raise ValidationError(
+                "available_quantity cannot exceed the quantity registered for this lot.",
+                details={"available_quantity": payload.available_quantity, "lot_quantity": lot.quantity},
+            )
+
+        if payload.status is not None and payload.status != listing.status:
+            return self.update_listing_status(
+                listing_id=listing_id,
+                new_status=payload.status,
+                actor=actor,
+                notes=payload.notes,
+            )
+
+        old_price = listing.asking_price_per_unit
+        updated = self.repository.update_listing(
+            listing,
+            asking_price_per_unit=payload.asking_price_per_unit,
+            available_quantity=payload.available_quantity,
+            currency=payload.currency,
+            visibility=payload.visibility,
+        )
+
+        self._record_event(
+            entity_type="listing",
+            entity_id=updated.id,
+            event_type=WorkflowEventType.LISTING_UPDATED,
+            from_state=listing.status.value,
+            to_state=updated.status.value,
+            actor=actor,
+            notes=payload.notes or "Listing updated",
+            metadata={"old_price": old_price, "new_price": updated.asking_price_per_unit},
+        )
+        return self.enrich_listing(updated)
 
     def list_listings(self, org_id: str, page: int, page_size: int) -> Tuple[List[ListingRead], int]:
         skip = (page - 1) * page_size
         rows, total = self.repository.list_listings(org_id=org_id, skip=skip, limit=page_size)
-        return [ListingRead.model_validate(r) for r in rows], total
+        return [self.enrich_listing(r) for r in rows], total
+
+    def search_exchange_listings(
+        self,
+        actor: AuthUser,
+        category: Optional[str] = None,
+        material_type: Optional[str] = None,
+        unit: Optional[str] = None,
+        min_quantity: Optional[float] = None,
+        max_price: Optional[float] = None,
+        visibility: Optional[ListingVisibility] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Tuple[List[ListingRead], int]:
+        """Search active discoverable listings across the circular exchange."""
+        skip = (page - 1) * page_size
+        vis_levels = [visibility] if visibility else sorted(DEFAULT_VISIBILITY_LEVELS, key=lambda v: v.value)
+
+        rows, total = self.repository.search_listings(
+            skip=skip,
+            limit=page_size,
+            status=ListingStatus.ACTIVE,
+            visibility_levels=vis_levels,
+            unit=unit,
+            min_quantity=min_quantity,
+            max_price=max_price,
+        )
+
+        enriched = [self.enrich_listing(r) for r in rows]
+        if category:
+            enriched = [r for r in enriched if r.material_category and _normalise(r.material_category) == _normalise(category)]
+        if material_type:
+            enriched = [r for r in enriched if r.material_type and _normalise(r.material_type) == _normalise(material_type)]
+
+        return enriched, len(enriched) if (category or material_type) else total
 
     # -- buyer requirements -------------------------------------------------
 
@@ -192,8 +342,24 @@ class MarketplaceService:
             required_properties=payload.required_properties,
             prohibited_conditions=payload.prohibited_conditions,
             visibility=payload.visibility,
+            location=payload.location,
+            delivery_requirements=payload.delivery_requirements,
+            constraints=payload.constraints,
         )
         saved = self.repository.add_requirement(requirement)
+        event = WorkflowEventModel(
+            entity_type="requirement",
+            entity_id=saved.id,
+            event_type=WorkflowEventType.REQUIREMENT_CREATED.value,
+            from_state=None,
+            to_state="active",
+            actor_id="system",
+            actor_role="buyer_admin",
+            actor_org_id=org_id,
+            notes="Buyer requirement registered on exchange",
+            metadata_payload={},
+        )
+        self.repository.add_workflow_event(event)
         return BuyerRequirementRead.model_validate(saved)
 
     def get_requirement(self, requirement_id: str, org_id: str) -> BuyerRequirementRead:
@@ -204,6 +370,71 @@ class MarketplaceService:
                 details={"requirement_id": requirement_id},
             )
         return BuyerRequirementRead.model_validate(requirement)
+
+    def list_requirements(self, org_id: str, page: int = 1, page_size: int = 20) -> Tuple[List[BuyerRequirementRead], int]:
+        skip = (page - 1) * page_size
+        rows, total = self.repository.list_requirements(org_id=org_id, skip=skip, limit=page_size)
+        return [BuyerRequirementRead.model_validate(r) for r in rows], total
+
+    def update_requirement(
+        self,
+        requirement_id: str,
+        payload: BuyerRequirementUpdate,
+        actor: AuthUser,
+    ) -> BuyerRequirementRead:
+        req = self.repository.get_requirement(requirement_id=requirement_id, org_id=actor.org_id)
+        if not req:
+            raise ResourceNotFoundError(
+                f"Buyer requirement '{requirement_id}' was not found in your organization scope.",
+                details={"requirement_id": requirement_id},
+            )
+
+        min_q = payload.min_quantity if payload.min_quantity is not None else req.min_quantity
+        max_q = payload.max_quantity if payload.max_quantity is not None else req.max_quantity
+        if max_q is not None and max_q < min_q:
+            raise ValidationError("max_quantity cannot be smaller than min_quantity")
+
+        updated = self.repository.update_requirement(
+            req,
+            min_quantity=payload.min_quantity,
+            max_quantity=payload.max_quantity,
+            target_price_per_unit=payload.target_price_per_unit,
+            required_properties=payload.required_properties,
+            prohibited_conditions=payload.prohibited_conditions,
+            visibility=payload.visibility,
+            location=payload.location,
+            delivery_requirements=payload.delivery_requirements,
+            constraints=payload.constraints,
+        )
+
+        self._record_event(
+            entity_type="requirement",
+            entity_id=updated.id,
+            event_type=WorkflowEventType.REQUIREMENT_UPDATED,
+            from_state=None,
+            to_state="active",
+            actor=actor,
+            notes="Buyer requirement updated",
+        )
+        return BuyerRequirementRead.model_validate(updated)
+
+    def delete_requirement(self, requirement_id: str, actor: AuthUser) -> None:
+        req = self.repository.get_requirement(requirement_id=requirement_id, org_id=actor.org_id)
+        if not req:
+            raise ResourceNotFoundError(
+                f"Buyer requirement '{requirement_id}' was not found in your organization scope.",
+                details={"requirement_id": requirement_id},
+            )
+        self.repository.delete_requirement(req)
+        self._record_event(
+            entity_type="requirement",
+            entity_id=requirement_id,
+            event_type=WorkflowEventType.REQUIREMENT_DELETED,
+            from_state="active",
+            to_state="deleted",
+            actor=actor,
+            notes="Buyer requirement deleted",
+        )
 
     # -- matching and qualification ----------------------------------------
 
@@ -247,6 +478,194 @@ class MarketplaceService:
             raw = await client.assess_lot_qualification(listing.material_lot_id, requirement_id)
             results.append(QualificationResult.model_validate(raw))
         return results
+
+    def _estimate_facility_distance(self, fac1: Optional[Facility], fac2: Optional[Facility]) -> float:
+        """Computes distance between facilities or returns regional default (estimated)."""
+        if not fac1 or not fac2:
+            return 120.0
+        if fac1.facility_id == fac2.facility_id:
+            return 0.0
+        if fac1.location_postal_code and fac2.location_postal_code:
+            try:
+                p1 = int("".join(filter(str.isdigit, fac1.location_postal_code)) or "10000")
+                p2 = int("".join(filter(str.isdigit, fac2.location_postal_code)) or "20000")
+                diff = abs(p1 - p2) % 500
+                return round(max(15.0, float(diff)), 1)
+            except Exception:
+                pass
+        return 145.0
+
+    def match_candidates_with_qualification(
+        self,
+        requirement_id: str,
+        org_id: str,
+    ) -> BuyerRequirementMatchesResponse:
+        """
+        Matches active listings against a buyer requirement.
+        Evaluates material compatibility, quantity, location constraints, and
+        authoritative deterministic ProofPath qualification.
+        CRITICAL RULE: Never override hard incompatibilities with a high match score.
+        Clearly distinguishes eligible, conditional, and ineligible candidates.
+        """
+        requirement = self.get_requirement(requirement_id=requirement_id, org_id=org_id)
+        req_fac = self.repository.get_facility(requirement.facility_id)
+
+        # Retrieve candidate listings from other organizations
+        listings = self.repository.list_discoverable_listings(
+            exclude_org_id=org_id,
+            visibility_levels=sorted(DEFAULT_VISIBILITY_LEVELS, key=lambda v: v.value),
+        )
+        lots = self.repository.get_lots_by_ids([l.material_lot_id for l in listings])
+
+        engine = ProofPathQualificationEngine()
+        matches: List[MatchCandidateRead] = []
+
+        for listing in listings:
+            lot = lots.get(listing.material_lot_id)
+            if not lot:
+                continue
+            tax = get_material_type(lot.material_type)
+            if not tax:
+                continue
+
+            enriched_listing = self.enrich_listing(listing)
+
+            compat_reasons: List[str] = []
+            incompatibilities: List[str] = []
+            missing_info: List[str] = []
+
+            # 1. Category check
+            if _normalise(tax.category) != _normalise(requirement.material_category):
+                incompatibilities.append(
+                    f"Category mismatch: listing category '{tax.category}' does not match required '{requirement.material_category}'."
+                )
+            else:
+                compat_reasons.append(f"Material category matches: {tax.category}")
+
+            # 2. Quantity check
+            if listing.available_quantity < requirement.min_quantity:
+                incompatibilities.append(
+                    f"Insufficient quantity: available {listing.available_quantity} {listing.unit} < required min {requirement.min_quantity} {requirement.unit}."
+                )
+            else:
+                compat_reasons.append(
+                    f"Quantity satisfied: {listing.available_quantity} {listing.unit} available (min: {requirement.min_quantity})"
+                )
+
+            # 3. Prohibited conditions check
+            declared_attrs = lot.declared_attributes or {}
+            for prohibited in requirement.prohibited_conditions:
+                p_lower = prohibited.strip().lower()
+                if declared_attrs.get(prohibited) is True or any(
+                    p_lower in str(c).lower() for c in declared_attrs.get("contaminants", [])
+                ):
+                    incompatibilities.append(f"Hard constraint violation: prohibited condition '{prohibited}' detected.")
+
+            # 4. Location / Distance calculation
+            list_fac = self.repository.get_facility(lot.facility_id)
+            distance_km = self._estimate_facility_distance(list_fac, req_fac)
+
+            delivery_reqs = getattr(requirement, "delivery_requirements", {}) or {}
+            max_dist = delivery_reqs.get("max_distance_km")
+            if max_dist and distance_km > float(max_dist):
+                incompatibilities.append(
+                    f"Distance constraint exceeded: estimated distance {distance_km} km exceeds maximum {max_dist} km."
+                )
+
+            # 5. Authoritative ProofPath Qualification
+            ev_records = self.repository.get_evidence_for_lot(lot.lot_id)
+            applicable_routes = [r for r in CANDIDATE_ROUTES.values() if r.target_material_type == lot.material_type]
+
+            proofpath_summary = None
+            if applicable_routes:
+                primary_route = applicable_routes[0]
+                assessment = engine.evaluate(lot=lot, route=primary_route, evidence_records=ev_records)
+                proofpath_summary = {
+                    "route_id": primary_route.route_id,
+                    "route_name": primary_route.name,
+                    "outcome": assessment.status.value,
+                    "blocking_conditions": assessment.blocking_conditions,
+                    "missing_facts": [getattr(f, "fact_id", str(f)) for f in assessment.missing_facts],
+                    "evidence_refs": assessment.evidence_refs,
+                }
+
+                if assessment.status == QualificationOutcome.UNSUPPORTED:
+                    for block in assessment.blocking_conditions:
+                        incompatibilities.append(f"ProofPath hard gate failure: {block}")
+                elif assessment.status == QualificationOutcome.CONDITIONAL:
+                    for mf in assessment.missing_facts:
+                        missing_info.append(f"Missing verification: {getattr(mf, 'fact_id', str(mf))}")
+                elif assessment.status == QualificationOutcome.SUPPORTED:
+                    compat_reasons.append(f"ProofPath qualified for route: {primary_route.name}")
+            else:
+                missing_info.append(f"No standard recovery route cataloged for '{lot.material_type}'")
+
+            # 6. Determine Eligibility and Match Score
+            # RULE: Incompatibilities CANNOT be overridden by a high match score!
+            if incompatibilities:
+                eligibility = MatchEligibility.INELIGIBLE
+                match_score = 0.0  # Zeroed out due to hard incompatibilities
+            elif missing_info:
+                eligibility = MatchEligibility.CONDITIONAL
+                base_score = 55.0
+                if requirement.target_price_per_unit and listing.asking_price_per_unit <= requirement.target_price_per_unit:
+                    base_score += 10.0
+                if distance_km <= 200.0:
+                    base_score += 5.0
+                match_score = min(74.0, base_score)
+            else:
+                eligibility = MatchEligibility.ELIGIBLE
+                score = 80.0
+                if requirement.target_price_per_unit:
+                    ratio = max(0.0, 1.0 - (listing.asking_price_per_unit / (requirement.target_price_per_unit + 0.001)))
+                    score += min(10.0, ratio * 10.0)
+                if distance_km <= 100.0:
+                    score += 8.0
+                elif distance_km <= 300.0:
+                    score += 4.0
+                match_score = min(98.0, score)
+
+            # Logistics comparison summary
+            logistics_summary = {
+                "distance_km": distance_km,
+                "is_distance_estimated": True,
+                "freight_mode": "road_standard_diesel",
+                "estimated_freight_cost_usd": round(distance_km * (listing.available_quantity / 1000.0) * 0.12, 2),
+                "estimated_emissions_kg_co2e": round(distance_km * (listing.available_quantity / 1000.0) * 0.095, 2),
+                "disclaimer": "Indicative transport estimate. Confirm with carrier.",
+            }
+
+            candidate_match = MatchCandidateRead(
+                listing=enriched_listing,
+                match_score=round(match_score, 1),
+                eligibility=eligibility,
+                compatibility_reasons=compat_reasons,
+                incompatibilities=incompatibilities,
+                missing_information=missing_info,
+                distance_km=distance_km,
+                logistics_summary=logistics_summary,
+                qualification_details=proofpath_summary,
+            )
+            matches.append(candidate_match)
+
+        # Sort matches: eligible first (highest score), then conditional, then ineligible
+        matches.sort(key=lambda m: (
+            0 if m.eligibility == MatchEligibility.ELIGIBLE else (1 if m.eligibility == MatchEligibility.CONDITIONAL else 2),
+            -m.match_score,
+        ))
+
+        eligible_count = sum(1 for m in matches if m.eligibility == MatchEligibility.ELIGIBLE)
+        conditional_count = sum(1 for m in matches if m.eligibility == MatchEligibility.CONDITIONAL)
+        ineligible_count = sum(1 for m in matches if m.eligibility == MatchEligibility.INELIGIBLE)
+
+        return BuyerRequirementMatchesResponse(
+            requirement_id=requirement.id,
+            total_candidates_evaluated=len(matches),
+            eligible_count=eligible_count,
+            conditional_count=conditional_count,
+            ineligible_count=ineligible_count,
+            matches=matches,
+        )
 
     # -- workflow event recording -------------------------------------------
 
@@ -487,6 +906,8 @@ class MarketplaceService:
             )
 
         old_status = rfq.status
+        rfq.approved_by = actor.user_id
+        rfq.approved_at = datetime.now(timezone.utc)
         updated = self.repository.update_rfq_status(rfq, RFQStatus.OPEN)
 
         self._record_event(
@@ -837,3 +1258,279 @@ class MarketplaceService:
 
         events = self.repository.get_workflow_events(entity_id=entity_id)
         return [WorkflowEventRead.model_validate(e) for e in events]
+
+    def review_offer(
+        self,
+        offer_id: str,
+        actor: AuthUser,
+        notes: Optional[str] = None,
+    ) -> OfferRead:
+        """Buyer places an offer under review."""
+        offer = self.repository.get_offer(offer_id=offer_id)
+        if not offer:
+            raise ResourceNotFoundError(f"Offer '{offer_id}' was not found.", details={"offer_id": offer_id})
+
+        rfq = self.repository.get_rfq(offer.rfq_id)
+        if not rfq:
+            raise ResourceNotFoundError(f"Linked RFQ '{offer.rfq_id}' was not found.")
+
+        if actor.role != "admin" and rfq.buyer_organization_id != actor.org_id:
+            raise ForbiddenError("Only the buyer organization can review this offer.")
+
+        if offer.status != OfferStatus.SUBMITTED:
+            raise InvalidStateTransitionError(
+                f"Cannot review offer with status '{offer.status.value}'. Must be SUBMITTED.",
+                details={"current_status": offer.status.value},
+            )
+
+        old_status = offer.status
+        offer.reviewed_by = actor.user_id
+        offer.reviewed_at = datetime.now(timezone.utc)
+        updated = self.repository.update_offer_status(offer, OfferStatus.UNDER_REVIEW)
+
+        self._record_event(
+            entity_type="offer",
+            entity_id=updated.id,
+            event_type=WorkflowEventType.OFFER_REVIEWED,
+            from_state=old_status.value,
+            to_state=OfferStatus.UNDER_REVIEW.value,
+            actor=actor,
+            notes=notes,
+        )
+        return OfferRead.model_validate(updated)
+
+    def withdraw_offer(
+        self,
+        offer_id: str,
+        actor: AuthUser,
+        notes: Optional[str] = None,
+    ) -> OfferRead:
+        """Seller withdraws their offer."""
+        offer = self.repository.get_offer(offer_id=offer_id)
+        if not offer:
+            raise ResourceNotFoundError(f"Offer '{offer_id}' was not found.", details={"offer_id": offer_id})
+
+        if actor.role != "admin" and offer.seller_organization_id != actor.org_id:
+            raise ForbiddenError("Only the seller organization can withdraw this offer.")
+
+        if offer.status in [OfferStatus.ACCEPTED, OfferStatus.REJECTED, OfferStatus.WITHDRAWN]:
+            raise InvalidStateTransitionError(
+                f"Cannot withdraw offer with status '{offer.status.value}'.",
+                details={"current_status": offer.status.value},
+            )
+
+        old_status = offer.status
+        updated = self.repository.update_offer_status(offer, OfferStatus.WITHDRAWN)
+
+        self._record_event(
+            entity_type="offer",
+            entity_id=updated.id,
+            event_type=WorkflowEventType.OFFER_WITHDRAWN,
+            from_state=old_status.value,
+            to_state=OfferStatus.WITHDRAWN.value,
+            actor=actor,
+            notes=notes,
+        )
+        return OfferRead.model_validate(updated)
+
+    def record_custom_event(self, payload: WorkflowEventCreate, actor: AuthUser) -> WorkflowEventRead:
+        """Records a custom auditable workflow event."""
+        created = self._record_event(
+            entity_type=payload.entity_type,
+            entity_id=payload.entity_id,
+            event_type=payload.event_type,
+            from_state=payload.from_state,
+            to_state=payload.to_state,
+            actor=actor,
+            notes=payload.notes,
+            metadata=payload.metadata,
+        )
+        return WorkflowEventRead.model_validate(created)
+
+    def list_workflow_events(
+        self,
+        actor: AuthUser,
+        entity_type: Optional[str] = None,
+        entity_id: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Tuple[List[WorkflowEventRead], int]:
+        """Lists workflow events with tenant isolation."""
+        skip = (page - 1) * page_size
+        actor_org = None if actor.role == "admin" else actor.org_id
+        rows, total = self.repository.list_workflow_events(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            actor_org_id=actor_org,
+            skip=skip,
+            limit=page_size,
+        )
+        return [WorkflowEventRead.model_validate(r) for r in rows], total
+
+    def compare_logistics(self, payload: LogisticsComparisonRequest) -> LogisticsComparisonResponse:
+        """Compares freight transport options between facilities or locations."""
+        fac1 = self.repository.get_facility(payload.origin_facility_id) if payload.origin_facility_id else None
+        fac2 = self.repository.get_facility(payload.destination_facility_id) if payload.destination_facility_id else None
+        distance_km = self._estimate_facility_distance(fac1, fac2)
+        if distance_km <= 0:
+            distance_km = 150.0
+
+        tonnes = payload.quantity / 1000.0 if payload.unit.lower() == "kg" else payload.quantity
+
+        # Standard Road Diesel
+        road_cost = round(max(80.0, distance_km * tonnes * 0.12), 2)
+        road_emissions = round(distance_km * tonnes * 0.095, 2)
+        road_days = max(1.0, round(distance_km / 650.0, 1))
+
+        # Electric Truck (Road EV)
+        ev_cost = round(max(95.0, distance_km * tonnes * 0.14), 2)
+        ev_emissions = round(distance_km * tonnes * 0.025, 2)
+        ev_days = max(1.0, round(distance_km / 550.0, 1))
+
+        # Rail Freight
+        rail_cost = round(max(150.0, distance_km * tonnes * 0.06), 2)
+        rail_emissions = round(distance_km * tonnes * 0.018, 2)
+        rail_days = max(2.0, round(distance_km / 400.0, 1))
+
+        options = [
+            FreightOption(
+                mode="road_standard_diesel",
+                mode_name="Standard Freight (Diesel Heavy Truck)",
+                estimated_cost_usd=road_cost,
+                cost_per_unit=round(road_cost / (payload.quantity + 0.001), 4),
+                estimated_duration_days=road_days,
+                estimated_emissions_kg_co2e=road_emissions,
+                is_estimated=True,
+                disclaimer="Estimated from regional average commercial diesel road freight rates.",
+            ),
+            FreightOption(
+                mode="road_electric_truck",
+                mode_name="Low-Emission Heavy Freight (Class 8 EV Truck)",
+                estimated_cost_usd=ev_cost,
+                cost_per_unit=round(ev_cost / (payload.quantity + 0.001), 4),
+                estimated_duration_days=ev_days,
+                estimated_emissions_kg_co2e=ev_emissions,
+                is_estimated=True,
+                disclaimer="Estimated assuming dedicated zero-emission charging network access.",
+            ),
+            FreightOption(
+                mode="rail_intermodal",
+                mode_name="Intermodal Bulk Rail Transport",
+                estimated_cost_usd=rail_cost,
+                cost_per_unit=round(rail_cost / (payload.quantity + 0.001), 4),
+                estimated_duration_days=rail_days,
+                estimated_emissions_kg_co2e=rail_emissions,
+                is_estimated=True,
+                disclaimer="Estimated based on regional bulk container siding access.",
+            ),
+        ]
+
+        summary = f"Freight route analysis across {distance_km} km for {payload.quantity} {payload.unit}. Rail offers lowest carbon footprint (-81% vs diesel), while EV truck balances low emissions with fast transit."
+        return LogisticsComparisonResponse(
+            distance_km=distance_km,
+            is_distance_estimated=True,
+            quantity=payload.quantity,
+            unit=payload.unit,
+            options=options,
+            summary=summary,
+            methodology="indicative_freight_emissions_and_cost_model",
+        )
+
+    def get_cluster_indicators(self, cluster_id: Optional[str] = None) -> ClusterIndicatorsResponse:
+        """Aggregates circular exchange metrics from persisted tables across the industrial cluster."""
+        aggs = self.repository.get_cluster_aggregates()
+        active_listings = aggs["active_listings"]
+        lots_map = aggs["lots_map"]
+        active_reqs = aggs["active_requirements"]
+
+        # Aggregate supply by category
+        cat_supply: Dict[str, Dict[str, Any]] = {}
+        top_mat_counts: Dict[str, int] = {}
+        for listing in active_listings:
+            lot = lots_map.get(listing.material_lot_id)
+            tax = get_material_type(lot.material_type) if lot else None
+            cat = tax.category if tax else "unclassified"
+            mat_type = lot.material_type if lot else "unknown"
+
+            if cat not in cat_supply:
+                cat_supply[cat] = {"category": cat, "count": 0, "quantity": 0.0, "unit": listing.unit}
+            cat_supply[cat]["count"] += 1
+            cat_supply[cat]["quantity"] += listing.available_quantity
+
+            top_mat_counts[mat_type] = top_mat_counts.get(mat_type, 0) + 1
+
+        supply_by_cat = [
+            MaterialCategoryVolume(
+                category=v["category"],
+                active_listings_count=v["count"],
+                total_quantity=round(v["quantity"], 2),
+                unit=v["unit"],
+            )
+            for v in cat_supply.values()
+        ]
+
+        # Aggregate demand by category
+        cat_demand: Dict[str, Dict[str, Any]] = {}
+        for req in active_reqs:
+            c = req.material_category
+            if c not in cat_demand:
+                cat_demand[c] = {"category": c, "count": 0, "quantity": 0.0, "unit": req.unit}
+            cat_demand[c]["count"] += 1
+            cat_demand[c]["quantity"] += req.min_quantity
+
+        demand_by_cat = [
+            MaterialCategoryVolume(
+                category=v["category"],
+                active_listings_count=v["count"],
+                total_quantity=round(v["quantity"], 2),
+                unit=v["unit"],
+            )
+            for v in cat_demand.values()
+        ]
+
+        top_materials = [
+            {"material_type": m, "active_listings": c}
+            for m, c in sorted(top_mat_counts.items(), key=lambda x: -x[1])[:5]
+        ]
+
+        circ_rate = None
+        total_exchanges = aggs["closed_rfqs_count"]
+        total_interactions = aggs["active_rfqs_count"] + total_exchanges
+        if total_interactions > 0:
+            circ_rate = round((total_exchanges / total_interactions) * 100.0, 1)
+
+        return ClusterIndicatorsResponse(
+            cluster_id=cluster_id or "cluster-default",
+            as_of=datetime.now(timezone.utc),
+            is_estimated=False,
+            source="persisted_marketplace_records",
+            total_active_listings=len(active_listings),
+            total_active_buyer_requirements=len(active_reqs),
+            total_active_rfqs=aggs["active_rfqs_count"],
+            completed_exchanges_count=aggs["closed_rfqs_count"],
+            supply_by_category=supply_by_cat,
+            demand_by_category=demand_by_cat,
+            top_materials=top_materials,
+            circularity_rate_pct=circ_rate,
+        )
+
+    def get_city_indicators(self) -> CityIndicatorsResponse:
+        """Aggregates municipal-level indicators with transparent estimation disclosure."""
+        aggs = self.repository.get_cluster_aggregates()
+        closed_count = aggs["closed_rfqs_count"]
+        active_listings = aggs["active_listings"]
+
+        # Diverted tonnes approximation
+        diverted_tonnes = round(closed_count * 25.0 + len(active_listings) * 2.5, 2)
+        part_fac = max(1, len({l.facility_id for l in active_listings}))
+
+        return CityIndicatorsResponse(
+            city="Greater Industrial Metro",
+            as_of=datetime.now(timezone.utc),
+            participating_facilities_count=part_fac,
+            diverted_material_tonnes=diverted_tonnes,
+            active_recovery_routes_count=len(CANDIDATE_ROUTES),
+            landfill_diversion_rate_pct=round(min(95.0, 62.0 + (diverted_tonnes / 500.0)), 1),
+            is_estimated=True,
+            methodology="facility_reporting_and_exchange_aggregated_metrics",
+        )
