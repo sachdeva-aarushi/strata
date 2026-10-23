@@ -38,4 +38,8 @@ def get_db() -> Generator[Session, None, None]:
 
 def init_db() -> None:
     """Creates database tables defined in metadata if they don't already exist."""
+    # Ensure all ORM models are registered on Base
+    import strata.domain.materials.models  # noqa: F401
+    import strata.domain.qualification.models  # noqa: F401
+
     Base.metadata.create_all(bind=engine)

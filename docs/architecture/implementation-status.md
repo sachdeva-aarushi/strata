@@ -87,7 +87,7 @@
 | Domain | Files present | Status | Notes |
 |--------|--------------|--------|-------|
 | materials/ | `models.py`, `service.py`, `repository.py`, `taxonomy.py` | TESTED | Organization, Facility, MaterialLot models, business validation, repository queries |
-| qualification/ | `models.py` | SCAFFOLD | Planned next |
+| qualification/ | `models.py`, `service.py`, `routes.py` | TESTED | EvidenceRecord, Investigation, QualificationAssessment models; ProofPathQualificationEngine (deterministic); ProofPathQualificationService (orchestration); CandidateRoute catalog with hard gates and required facts |
 | marketplace/ | `models.py` | SCAFFOLD | Assigned to Hitendra |
 | prevention/ | Directory present | SCAFFOLD | Consistent pattern with others |
 | impact/ | Directory present | SCAFFOLD | Consistent pattern with others |
@@ -102,7 +102,11 @@
 | POST /api/v1/materials/lots | TESTED | Creates material lot scoped to tenant |
 | GET /api/v1/materials/lots/{id} | TESTED | Retrieves single lot with tenant isolation |
 | GET /api/v1/materials/lots | TESTED | Lists lots with pagination and filtering |
-| Qualification endpoints | MISSING | Planned next |
+| POST /api/v1/evidence | TESTED | Register audit-grade evidence record with provenance and verification state |
+| GET /api/v1/lots/{lot_id}/evidence | TESTED | List evidence claims for a material lot |
+| POST /api/v1/investigations | TESTED | Launch deterministic ProofPath qualification run against candidate routes |
+| GET /api/v1/investigations/{id} | TESTED | Retrieve investigation with embedded route assessments |
+| GET /api/v1/lots/{lot_id}/routes | TESTED | Retrieve candidate route qualification assessments for a lot |
 | Exchange / marketplace endpoints | MISSING | Assigned to Hitendra |
 | Prevention endpoints | MISSING | |
 | Cluster / municipal endpoints | MISSING | Assigned to Hitendra |
@@ -114,9 +118,9 @@
 |------|--------|-------|
 | schemas/common.py | TESTED | Standard response, paginated, and error envelopes |
 | schemas/organization.py | TESTED | OrganizationRef, FacilityRef |
-| schemas/evidence.py | TESTED | EvidenceStatus enum, EvidenceRecordCreate, EvidenceRecordRead |
+| schemas/evidence.py | TESTED | EvidenceProvenance, EvidenceVerificationState, ExtractionMethod enums; EvidenceRecordCreate, EvidenceRecordRead with source refs, content hash, provenance, verification state |
 | schemas/materials.py | TESTED | MaterialLotStatus, MaterialTypeInfo, MaterialLotCreate, MaterialLotRead |
-| schemas/qualification.py | TESTED | AssessmentStatus, HardGateResult, MissingFact, QualificationAssessmentRead |
+| schemas/qualification.py | TESTED | QualificationOutcome (supported/conditional/unsupported), InvestigationExecutionStatus (pending/completed/failed), HardGateResult, MissingFact, QualificationAssessmentRead, InvestigationCreate, InvestigationRead |
 | schemas/marketplace.py | TESTED | ListingStatus, RFQStatus, ExchangeListingRead, RFQRead, OfferRead |
 | schemas/workflow.py | TESTED | WorkflowEventType, WorkflowEventCreate, WorkflowEventRead |
 | schemas/impact.py | TESTED | ImpactStage, ImpactCalculationRead |
@@ -127,6 +131,10 @@
 |------|--------|-------|
 | domain/materials/service.py | TESTED | MaterialService business logic and validation |
 | domain/materials/repository.py | TESTED | MaterialLotRepository SQL persistence |
+| domain/qualification/service.py | TESTED | ProofPathQualificationEngine (deterministic gate/fact evaluator) + ProofPathQualificationService (investigation orchestration, evidence persistence) |
+| domain/qualification/routes.py | TESTED | CandidateRoute catalog (aluminum smelter, solvent distillation, PP regrind) with RouteGateSpec and RequiredFactSpec |
+| integrations/llm.py | TESTED | LLMProvider abstract interface + FakeLLMProvider (advisory text synthesis only; no eligibility evaluation) |
+| integrations/discovery.py | TESTED | DiscoveryProvider abstract interface + FakeDiscoveryProvider (synthetic labelled fixtures) |
 
 ### 3.9 Workers
 
@@ -138,10 +146,12 @@
 
 | Area | Status | Notes |
 |------|--------|-------|
-| tests/conftest.py | TESTED | Pytest fixtures, in-memory SQLite, test client, tenant headers |
+| tests/conftest.py | TESTED | Pytest fixtures, in-memory SQLite, test client, tenant headers, multi-org headers |
 | tests/unit/test_schemas.py | TESTED | 9 unit tests passing (contracts, validation, enums) |
+| tests/unit/test_qualification_engine.py | TESTED | 5 unit tests passing (supported, unsupported/hard-incompatibility, conditional/missing-facts, contradicted-evidence, deterministic-reproducibility) |
 | tests/integration/test_health.py | TESTED | 2 integration tests passing (root & v1 health) |
 | tests/integration/test_materials.py | TESTED | 7 integration tests passing (CRUD, validation, pagination, tenant isolation) |
+| tests/integration/test_qualification.py | TESTED | 6 integration tests passing (evidence CRUD, supported/unsupported/conditional investigations, route listing, tenant isolation) |
 
 ---
 
