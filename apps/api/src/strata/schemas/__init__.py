@@ -15,8 +15,18 @@ from strata.schemas.evidence import (
     ExtractionMethod,
 )
 from strata.schemas.impact import (
+    ImpactCalculation,
     ImpactCalculationRead,
+    ImpactCalculationRequest,
+    ImpactMethodologyInfo,
+    ImpactRecordCreate,
+    ImpactRecordRead,
     ImpactStage,
+    ImpactSummaryRead,
+    LifecycleEventType,
+    MassBalanceReport,
+    UncertaintyRating,
+    VerificationStatus,
 )
 from strata.schemas.marketplace import (
     ExchangeListingRead,
