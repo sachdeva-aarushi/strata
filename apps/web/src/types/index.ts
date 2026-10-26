@@ -1,9 +1,11 @@
 export type UserRole =
   | 'facility_operator'
+  | 'facility_manager'
   | 'buyer'
   | 'seller'
   | 'admin'
   | 'municipal_authority';
+
 
 export interface AuthUser {
   user_id: string;
